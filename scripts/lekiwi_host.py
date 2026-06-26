@@ -40,13 +40,9 @@ lerobot_src_dir = project_dir / "lerobot" / "src"
 if lerobot_src_dir.exists():
     sys.path.append(str(lerobot_src_dir))
 
-from lerobot.cameras.configs import CameraConfig, Cv2Rotation
-from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
-from lerobot.robots.config import RobotConfig
 from lerobot.robots.lekiwi.config_lekiwi import (
     LeKiwiConfig,
     LeKiwiClientConfig,
-    LeKiwiHostConfig,
 )
 from lerobot.robots.lekiwi.lekiwi import LeKiwi as OriginalLeKiwi
 from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient as OriginalLeKiwiClient

@@ -9,8 +9,7 @@ import time
 from lerobot.robots.so_follower import SO100Follower, SO100FollowerConfig, SO101Follower, SO101FollowerConfig
 from lerobot.utils.robot_utils import precise_sleep
 
-from config_uarm_leader_config1 import UarmLeaderConfig
-from uarm_leader_config1 import Uarm_Leader
+from uarm_leader_config1 import Uarm_Leader, UarmLeaderConfig
 
 
 def parse_args() -> argparse.Namespace:

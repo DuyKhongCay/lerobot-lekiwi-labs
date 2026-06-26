@@ -38,31 +38,28 @@ uarm_leader_dir = project_dir / "lekiwi_labs" / "teleoperates" / "uarm-leader-co
 sys.path.append(str(uarm_leader_dir))
 
 # Import required modules
-from config_uarm_leader_config1 import UarmLeaderConfig
 from lekiwi_labs.scripts.lekiwi_host import LeKiwiClientConfig
 from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient
+from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig
+from lerobot.teleoperators.config import TeleoperatorConfig
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
-from uarm_leader_config1 import UarmLeader
-
-FPS = 30
-
+from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
 
 @dataclass
-class TeleoperateScriptConfig:
+class TeleoperateScriptConfig(TeleoperateConfig):
     # Use our custom LeKiwiClientConfig imported from lekiwi_host.py
     robot: LeKiwiClientConfig = field(default_factory=lambda: LeKiwiClientConfig(remote_ip="127.0.0.1"))
-    # Use UarmLeaderConfig imported from config_uarm_leader_config1.py
-    teleop_arm: UarmLeaderConfig = field(default_factory=lambda: UarmLeaderConfig(port="/dev/ttyUSB0"))
+    # Use UarmLeaderConfig imported from uarm_leader_config1.py
+    teleop: TeleoperatorConfig = field(default_factory=lambda: UarmLeaderConfig(port="/dev/ttyUSB0"))
     keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
-
 
 @draccus.wrap()
 def main(cfg: TeleoperateScriptConfig):
     # Initialize the robot, leader arm and keyboard teleoperators
     robot = LeKiwiClient(cfg.robot)
-    leader_arm = UarmLeader(cfg.teleop_arm)
+    leader_arm = UarmLeader(cfg.teleop)
     keyboard = KeyboardTeleop(cfg.keyboard)
 
     # Connect to the robot, leader arm and keyboard
@@ -71,7 +68,7 @@ def main(cfg: TeleoperateScriptConfig):
     print(f"Connecting to LeKiwi client at {cfg.robot.remote_ip}...")
     robot.connect()
     
-    print(f"Connecting to uArm leader arm on port {cfg.teleop_arm.port}...")
+    print(f"Connecting to uArm leader arm on port {cfg.teleop.port}...")
     leader_arm.connect()
     
     print("Connecting to keyboard teleoperator...")
@@ -111,7 +108,7 @@ def main(cfg: TeleoperateScriptConfig):
             log_rerun_data(observation=observation, action=action)
 
             # Control the frequency of the teleoperation loop
-            precise_sleep(max(1.0 / FPS - (time.perf_counter() - t0), 0.0))
+            precise_sleep(max(1.0 / cfg.fps - (time.perf_counter() - t0), 0.0))
 
     except KeyboardInterrupt:
         print("\nDiscontinuing teleoperation loop...")
