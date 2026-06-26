@@ -29,6 +29,7 @@ from pathlib import Path
 
 import cv2
 import draccus
+import numpy as np
 import zmq
 
 # Add project root and lerobot src to python path for importing
@@ -43,69 +44,21 @@ from lerobot.cameras.configs import CameraConfig, Cv2Rotation
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 from lerobot.robots.config import RobotConfig
 from lerobot.robots.lekiwi.config_lekiwi import (
-    LeKiwiConfig as OriginalLeKiwiConfig,
-    LeKiwiClientConfig as OriginalLeKiwiClientConfig,
+    LeKiwiConfig,
+    LeKiwiClientConfig,
     LeKiwiHostConfig,
 )
 from lerobot.robots.lekiwi.lekiwi import LeKiwi as OriginalLeKiwi
+from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient as OriginalLeKiwiClient
+from lerobot.robots.lekiwi.lekiwi_host import LeKiwiHost, LeKiwiServerConfig
+from lerobot.types import RobotAction
 
 # Import custom Grayscale camera configuration from either lekiwi_labs or pi5_labs
 from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig, make_cameras_from_configs as make_duy0cay_cameras
 
 
-def lekiwi_cameras_config() -> dict[str, CameraConfig]:
-    """
-    Custom camera configuration function for LeKiwi robot.
-    """
-    return {
-        # "front": OpenCVCameraConfig(
-        #     index_or_path="/dev/lekiwi_front_steoreocam",
-        #     fps=30,
-        #     width=640,
-        #     height=480,
-        #     rotation=Cv2Rotation.ROTATE_180,
-        # ),
-        "wrist": GrayscaleOpenCVCamConfig(
-            index_or_path="/dev/lekiwi_wrist_cam",
-            fps=30,
-            width=480,
-            height=640,
-            rotation=Cv2Rotation.ROTATE_90,
-        ),
-        "side": OpenCVCameraConfig(
-            index_or_path="/dev/lekiwi_side_webcam",
-            fps=30,
-            width=480,
-            height=640,
-            rotation=Cv2Rotation.ROTATE_90,
-        ),
-    }
 
-
-@RobotConfig.register_subclass("duy0cay_lekiwi")
-@dataclass(kw_only=True)
-class LeKiwiConfig(OriginalLeKiwiConfig):
-    # Set default ID to load DuyKhongCay calibration by default
-    id: str | None = "DuyKhongCay"
-    cameras: dict[str, CameraConfig] = field(default_factory=lekiwi_cameras_config)
-
-
-@RobotConfig.register_subclass("duy0cay_lekiwi_client")
-@dataclass(kw_only=True)
-class LeKiwiClientConfig(OriginalLeKiwiClientConfig):
-    # Set default ID to load DuyKhongCay calibration by default
-    id: str | None = "DuyKhongCay"
-    cameras: dict[str, CameraConfig] = field(default_factory=lekiwi_cameras_config)
-
-
-@dataclass
-class LeKiwiServerConfig:
-    """Configuration for the LeKiwi host script."""
-
-    robot: LeKiwiConfig = field(default_factory=LeKiwiConfig)
-    host: LeKiwiHostConfig = field(default_factory=LeKiwiHostConfig)
-
-
+@RobotConfig.register_subclass("lekiwi")
 class LeKiwi(OriginalLeKiwi):
     config_class = LeKiwiConfig
 
@@ -120,6 +73,79 @@ class LeKiwi(OriginalLeKiwi):
         finally:
             lekiwi_module.make_cameras_from_configs = original_make_cameras
 
+        # Initialize internal keyboard teleop for controlling the base
+        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+        self.keyboard_teleop = KeyboardTeleop(KeyboardTeleopConfig(id="lekiwi_internal_keyboard"))
+
+        # Speed control and keyboard keys setup for local LeKiwi robot base
+        self.teleop_keys = {
+            "forward": "w",
+            "backward": "s",
+            "left": "a",
+            "right": "d",
+            "rotate_left": "z",
+            "rotate_right": "x",
+            "speed_up": "r",
+            "speed_down": "f",
+            "quit": "q",
+        }
+        self.speed_levels = [
+            {"xy": 0.1, "theta": 30},  # slow
+            {"xy": 0.2, "theta": 60},  # medium
+            {"xy": 0.3, "theta": 90},  # fast
+        ]
+        self.speed_index = 0
+
+    def connect(self, calibrate: bool = True) -> None:
+        super().connect(calibrate=calibrate)
+        self.keyboard_teleop.connect()
+
+    def disconnect(self) -> None:
+        if hasattr(self, "keyboard_teleop"):
+            self.keyboard_teleop.disconnect()
+        super().disconnect()
+
+    def _from_keyboard_to_base_action(self, pressed_keys: np.ndarray) -> dict[str, float]:
+        # Speed control
+        if self.teleop_keys["speed_up"] in pressed_keys:
+            self.speed_index = min(self.speed_index + 1, 2)
+        if self.teleop_keys["speed_down"] in pressed_keys:
+            self.speed_index = max(self.speed_index - 1, 0)
+        speed_setting = self.speed_levels[self.speed_index]
+        xy_speed = speed_setting["xy"]
+        theta_speed = speed_setting["theta"]
+
+        x_cmd = 0.0
+        y_cmd = 0.0
+        theta_cmd = 0.0
+
+        if self.teleop_keys["forward"] in pressed_keys:
+            x_cmd += xy_speed
+        if self.teleop_keys["backward"] in pressed_keys:
+            x_cmd -= xy_speed
+        if self.teleop_keys["left"] in pressed_keys:
+            y_cmd += xy_speed
+        if self.teleop_keys["right"] in pressed_keys:
+            y_cmd -= xy_speed
+        if self.teleop_keys["rotate_left"] in pressed_keys:
+            theta_cmd += theta_speed
+        if self.teleop_keys["rotate_right"] in pressed_keys:
+            theta_cmd -= theta_speed
+        return {
+            "x.vel": x_cmd,
+            "y.vel": y_cmd,
+            "theta.vel": theta_cmd,
+        }
+
+    def send_action(self, action: RobotAction) -> RobotAction:
+        if self.keyboard_teleop.is_connected:
+            pressed_keys = self.keyboard_teleop.get_action()
+            keys_list = list(pressed_keys.keys())
+            base_action = self._from_keyboard_to_base_action(np.array(keys_list))
+            # Merge base action into the action command
+            action = {**action, **base_action}
+        return super().send_action(action)
+
     def calibrate(self) -> None:
         # Overridden to automatically load and write the calibration file
         # without blocking for interactive input on the host.
@@ -131,25 +157,34 @@ class LeKiwi(OriginalLeKiwi):
             super().calibrate()
 
 
-class LeKiwiHost:
-    def __init__(self, config: LeKiwiHostConfig):
-        self.zmq_context = zmq.Context()
-        self.zmq_cmd_socket = self.zmq_context.socket(zmq.PULL)
-        self.zmq_cmd_socket.setsockopt(zmq.CONFLATE, 1)
-        self.zmq_cmd_socket.bind(f"tcp://*:{config.port_zmq_cmd}")
+@RobotConfig.register_subclass("lekiwi_client")
+class LeKiwiClient(OriginalLeKiwiClient):
+    config_class = LeKiwiClientConfig
 
-        self.zmq_observation_socket = self.zmq_context.socket(zmq.PUSH)
-        self.zmq_observation_socket.setsockopt(zmq.CONFLATE, 1)
-        self.zmq_observation_socket.bind(f"tcp://*:{config.port_zmq_observations}")
+    def __init__(self, config: LeKiwiClientConfig):
+        super().__init__(config)
+        # Initialize internal keyboard teleop for controlling the base
+        from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+        self.keyboard_teleop = KeyboardTeleop(KeyboardTeleopConfig(id="lekiwi_internal_keyboard"))
 
-        self.connection_time_s = config.connection_time_s
-        self.watchdog_timeout_ms = config.watchdog_timeout_ms
-        self.max_loop_freq_hz = config.max_loop_freq_hz
+    def connect(self) -> None:
+        super().connect()
+        self.keyboard_teleop.connect()
 
-    def disconnect(self):
-        self.zmq_observation_socket.close()
-        self.zmq_cmd_socket.close()
-        self.zmq_context.term()
+    def disconnect(self) -> None:
+        if hasattr(self, "keyboard_teleop"):
+            self.keyboard_teleop.disconnect()
+        super().disconnect()
+
+    def send_action(self, action: RobotAction) -> RobotAction:
+        if self.keyboard_teleop.is_connected:
+            pressed_keys = self.keyboard_teleop.get_action()
+            keys_list = list(pressed_keys.keys())
+            base_action = self._from_keyboard_to_base_action(np.array(keys_list))
+            # Merge base action into the action command before forwarding to host
+            action = {**action, **base_action}
+        return super().send_action(action)
+
 
 
 @draccus.wrap()

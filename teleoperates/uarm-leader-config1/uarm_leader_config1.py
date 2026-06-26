@@ -178,7 +178,7 @@ class Uarm_Leader(Teleoperator):
     @check_if_not_connected
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         if feedback:
-            raise ValueError("Uarm_Leader_Config2 does not support force or haptic feedback.")
+            raise ValueError("Uarm_Leader_Config1 does not support force or haptic feedback.")
 
     @check_if_not_connected
     def disconnect(self) -> None:

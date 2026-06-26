@@ -1,0 +1,20 @@
+# LeKiwi connection configuration for LeKiwiClient
+type: lekiwi_client
+remote_ip: 127.0.0.1  # Robot IP address (change as needed, e.g., 172.18.134.136)
+port_zmq_cmd: 5555
+port_zmq_observations: 5556
+id: DuyKhongCay
+
+cameras:
+  wrist:
+    type: grayscale_opencv
+    index_or_path: /dev/lekiwi_wrist_cam
+    fps: 30
+    width: 480
+    height: 640
+  side:
+    type: opencv
+    index_or_path: /dev/lekiwi_side_webcam
+    fps: 30
+    width: 480
+    height: 640
