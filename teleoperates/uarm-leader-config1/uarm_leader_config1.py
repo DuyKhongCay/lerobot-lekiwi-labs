@@ -15,9 +15,9 @@ from lerobot.types import RobotAction
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
 
 if __package__:
-    from .config_uarm_leader_config2 import UarmLeaderConfig2Config
+    from .config_uarm_leader_config1 import UarmLeaderConfig
 else:
-    from config_uarm_leader_config2 import UarmLeaderConfig2Config
+    from config_uarm_leader_config1 import UarmLeaderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ JOINT_SERVO_TERMS: dict[str, tuple[tuple[int, float], ...]] = {
 class UarmSerialServoReader:
     """Low-level reader for the uArm servo serial protocol used by the original scripts."""
 
-    def __init__(self, config: UarmLeaderConfig2Config):
+    def __init__(self, config: UarmLeaderConfig):
         if len(config.servo_ids) != 7:
             raise ValueError("Uarm_Leader_Config2 expects exactly 7 servo ids.")
 
@@ -95,13 +95,13 @@ class UarmSerialServoReader:
         self.ser = None
 
 
-class Uarm_Leader_Config2(Teleoperator):
+class Uarm_Leader(Teleoperator):
     """LeRobot Teleoperator wrapper around the uArm leader serial reader."""
 
-    config_class = UarmLeaderConfig2Config
-    name = "uarm_leader_config2"
+    config_class = UarmLeaderConfig
+    name = "uarm_leader"
 
-    def __init__(self, config: UarmLeaderConfig2Config):
+    def __init__(self, config: UarmLeaderConfig):
         super().__init__(config)
         self.config = config
         self.reader = UarmSerialServoReader(config)
@@ -200,4 +200,4 @@ class Uarm_Leader_Config2(Teleoperator):
             json.dump(self.zero_angles, f, indent=4)
 
 
-UarmLeaderConfig2 = Uarm_Leader_Config2
+UarmLeader = Uarm_Leader

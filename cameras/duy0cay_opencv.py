@@ -19,6 +19,8 @@ and converting them to RGB or BGR format for compatibility with the LeRobot pipe
 
 from dataclasses import dataclass
 import logging
+from pathlib import Path
+import platform
 import time
 from typing import Any
 
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 @CameraConfig.register_subclass("grayscale_opencv")
 @dataclass
-class GrayscaleCamOpenCVConfig(OpenCVCameraConfig):
+class GrayscaleOpenCVCamConfig(OpenCVCameraConfig):
     """Configuration class for grayscale-based OpenCV camera devices.
     
     Inherits all properties from OpenCVCameraConfig and registers under the choice "grayscale_opencv".
@@ -45,7 +47,7 @@ class GrayscaleCamOpenCVConfig(OpenCVCameraConfig):
     pass
 
 
-class GrayscaleCamOpenCV(OpenCVCamera):
+class GrayscaleOpenCVCam(OpenCVCamera):
     """
     Manages camera interactions using OpenCV for capturing grayscale frames and
     converting them to RGB/BGR to be compatible with LeRobot's camera pipeline.
@@ -149,7 +151,7 @@ def make_cameras_from_configs(camera_configs: dict[str, CameraConfig]) -> dict[s
             from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
             cameras[key] = OpenCVCamera(cast(OpenCVCameraConfig, cfg))
         elif cfg.type == "grayscale_opencv":
-            cameras[key] = GrayscaleCamOpenCV(cast(GrayscaleCamOpenCVConfig, cfg))
+            cameras[key] = GrayscaleOpenCVCam(cast(GrayscaleOpenCVCamConfig, cfg))
         else:
             raise ValueError(
                 f"Unsupported camera type '{cfg.type}' for camera {key}. "
@@ -157,3 +159,68 @@ def make_cameras_from_configs(camera_configs: dict[str, CameraConfig]) -> dict[s
             )
 
     return cameras
+
+
+def duy0cay_find_cameras() -> list[dict[str, Any]]:
+    # Override targets to scan on Linux to include lekiwi_* symlinks and deduplicate them
+    if platform.system() == "Linux":
+        dev_dir = Path("/dev")
+        paths = list(dev_dir.glob("video*")) + list(dev_dir.glob("lekiwi_*"))
+        
+        resolved_to_paths = {}
+        for p in paths:
+            try:
+                resolved = p.resolve()
+                if resolved in resolved_to_paths:
+                    # Prefer custom lekiwi_* symlink over raw video* paths
+                    if p.name.startswith("lekiwi_") and not resolved_to_paths[resolved].name.startswith("lekiwi_"):
+                        resolved_to_paths[resolved] = p
+                else:
+                    resolved_to_paths[resolved] = p
+            except Exception:
+                resolved_to_paths[p] = p
+        
+        possible_paths = sorted(list(resolved_to_paths.values()), key=lambda p: p.name)
+        targets_to_scan = [str(p) for p in possible_paths]
+    else:
+        # Fallback to scanning standard indices on other systems
+        targets_to_scan = [int(i) for i in range(60)]
+
+    found_cameras_info = []
+    for target in targets_to_scan:
+        camera = cv2.VideoCapture(target)
+        if camera.isOpened():
+            default_width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH))
+            default_height = int(camera.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            default_fps = camera.get(cv2.CAP_PROP_FPS)
+            default_format = camera.get(cv2.CAP_PROP_FORMAT)
+
+            # Get FOURCC code and convert to string
+            default_fourcc_code = camera.get(cv2.CAP_PROP_FOURCC)
+            default_fourcc_code_int = int(default_fourcc_code)
+            default_fourcc = "".join([chr((default_fourcc_code_int >> 8 * i) & 0xFF) for i in range(4)])
+
+            camera_info = {
+                "name": f"OpenCV Camera @ {target}",
+                "type": "OpenCV",
+                "id": target,
+                "backend_api": camera.getBackendName(),
+                "default_stream_profile": {
+                    "format": default_format,
+                    "fourcc": default_fourcc,
+                    "width": default_width,
+                    "height": default_height,
+                    "fps": default_fps,
+                },
+            }
+
+            found_cameras_info.append(camera_info)
+            camera.release()
+
+    return found_cameras_info
+
+
+# Patch OpenCVCamera.find_cameras with our custom method
+OpenCVCamera.find_cameras = staticmethod(duy0cay_find_cameras)
+
+

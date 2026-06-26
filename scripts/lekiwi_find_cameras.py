@@ -55,7 +55,9 @@ from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 from lerobot.utils.errors import DeviceNotConnectedError
 
-from pi5_labs.cameras.grayscale_opencv import GrayscaleCamOpenCV, GrayscaleCamOpenCVConfig
+# Import custom camera configuration
+from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam
+
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +153,9 @@ def find_all_opencv_cameras() -> list[dict[str, Any]]:
         for cam_info in opencv_cameras:
             target = cam_info["id"]
             
-            # If target is not in the filtered real capture devices list, skip it
-            if real_devices is not None and str(target) not in real_devices:
+            # If target is not in the filtered real capture devices list (check both original and resolved path), skip it
+            resolved_target = str(Path(target).resolve())
+            if real_devices is not None and str(target) not in real_devices and resolved_target not in real_devices:
                 logger.debug(f"Skipping platform/ISP backend device: {target}")
                 continue
             
@@ -309,11 +312,11 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
             )
             instance = OpenCVCamera(cv_config)
         elif cam_type == "GrayscaleOpenCV":
-            cv_config = GrayscaleCamOpenCVConfig(
+            cv_config = GrayscaleOpenCVCamConfig(
                 index_or_path=cam_id,
                 color_mode=ColorMode.RGB,
             )
-            instance = GrayscaleCamOpenCV(cv_config)
+            instance = GrayscaleOpenCVCam(cv_config)
         elif cam_type == "RealSense":
             rs_config = RealSenseCameraConfig(
                 serial_number_or_name=cam_id,

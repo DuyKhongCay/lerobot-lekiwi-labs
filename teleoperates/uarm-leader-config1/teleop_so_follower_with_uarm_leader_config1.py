@@ -9,8 +9,8 @@ import time
 from lerobot.robots.so_follower import SO100Follower, SO100FollowerConfig, SO101Follower, SO101FollowerConfig
 from lerobot.utils.robot_utils import precise_sleep
 
-from config_uarm_leader_config2 import UarmLeaderConfig2Config
-from uarm_leader_config2 import Uarm_Leader_Config2
+from config_uarm_leader_config1 import UarmLeaderConfig
+from uarm_leader_config1 import Uarm_Leader
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,8 +39,8 @@ def main() -> None:
     args = parse_args()
 
     robot = make_robot(args)
-    teleop = Uarm_Leader_Config2(
-        UarmLeaderConfig2Config(
+    teleop = Uarm_Leader(
+        UarmLeaderConfig(
             port=args.uarm_port,
             baudrate=args.baudrate,
             id=args.uarm_id,
