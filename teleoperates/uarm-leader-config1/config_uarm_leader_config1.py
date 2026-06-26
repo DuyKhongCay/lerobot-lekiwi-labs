@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from lerobot.teleoperators.config import TeleoperatorConfig
 
 
-@TeleoperatorConfig.register_subclass("uarm_leader_config2")
+@TeleoperatorConfig.register_subclass("uarm_leader")
 @dataclass
-class UarmLeaderConfig2Config(TeleoperatorConfig):
+class UarmLeaderConfig(TeleoperatorConfig):
     """Configuration for the uArm-as-leader serial teleoperator."""
 
     port: str = "/dev/ttyUSB0"

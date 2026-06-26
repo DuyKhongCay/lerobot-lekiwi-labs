@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+    #!/usr/bin/env python
 
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
@@ -37,9 +37,8 @@ from pprint import pformat
 
 import draccus
 
-# Import custom camera config subclass to register it under CameraConfig
-# so that draccus CLI parser knows about it when parsing robot config
-from pi5_labs.cameras.grayscale_opencv import GrayscaleCamOpenCV, GrayscaleCamOpenCVConfig
+# Import custom camera class for grayscale cameras
+from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCam
 
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 from lerobot.utils.errors import DeviceNotConnectedError
