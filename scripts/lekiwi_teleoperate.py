@@ -38,9 +38,8 @@ uarm_leader_dir = project_dir / "lekiwi_labs" / "teleoperates" / "uarm-leader-co
 sys.path.append(str(uarm_leader_dir))
 
 # Import required modules
-from lekiwi_labs.scripts.lekiwi_host import LeKiwiClientConfig
 from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient
-from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig
+from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig as OriginalTeleoperateConfig
 from lerobot.teleoperators.config import TeleoperatorConfig
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
 from lerobot.utils.robot_utils import precise_sleep
@@ -48,15 +47,13 @@ from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
 
 @dataclass
-class TeleoperateScriptConfig(TeleoperateConfig):
-    # Use our custom LeKiwiClientConfig imported from lekiwi_host.py
-    robot: LeKiwiClientConfig = field(default_factory=lambda: LeKiwiClientConfig(remote_ip="127.0.0.1"))
+class TeleoperateConfig(OriginalTeleoperateConfig):
     # Use UarmLeaderConfig imported from uarm_leader_config1.py
     teleop: TeleoperatorConfig = field(default_factory=lambda: UarmLeaderConfig(port="/dev/ttyUSB0"))
     keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
 
 @draccus.wrap()
-def main(cfg: TeleoperateScriptConfig):
+def main(cfg: TeleoperateConfig):
     # Initialize the robot, leader arm and keyboard teleoperators
     robot = LeKiwiClient(cfg.robot)
     leader_arm = UarmLeader(cfg.teleop)

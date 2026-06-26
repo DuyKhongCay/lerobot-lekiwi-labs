@@ -95,7 +95,7 @@ class LeKiwi(OriginalLeKiwi):
         self.keyboard_teleop.connect()
 
     def disconnect(self) -> None:
-        if hasattr(self, "keyboard_teleop"):
+        if getattr(self, "keyboard_teleop", None) and getattr(self.keyboard_teleop, "is_connected", False):
             self.keyboard_teleop.disconnect()
         super().disconnect()
 
@@ -165,7 +165,7 @@ class LeKiwiClient(OriginalLeKiwiClient):
         self.keyboard_teleop.connect()
 
     def disconnect(self) -> None:
-        if hasattr(self, "keyboard_teleop"):
+        if getattr(self, "keyboard_teleop", None) and getattr(self.keyboard_teleop, "is_connected", False):
             self.keyboard_teleop.disconnect()
         super().disconnect()
 

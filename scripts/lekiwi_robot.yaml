@@ -4,16 +4,4 @@ remote_ip: 192.168.1.6  # Robot IP address (change as needed, e.g., 172.18.134.1
 
 id: DuyKhongCay
 polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
-cameras:
-  wrist:
-    type: grayscale_opencv
-    index_or_path: /dev/lekiwi_wrist_cam
-    fps: 30
-    width: 480
-    height: 640
-  side:
-    type: opencv
-    index_or_path: /dev/lekiwi_side_webcam
-    fps: 30
-    width: 480
-    height: 640
+cameras: !include lekiwi_cameras.yaml

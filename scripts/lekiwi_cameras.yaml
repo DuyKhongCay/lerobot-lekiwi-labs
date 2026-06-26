@@ -1,0 +1,15 @@
+# Shared camera configuration for LeKiwi robot
+wrist:
+  type: grayscale_opencv
+  index_or_path: /dev/lekiwi_wrist_cam
+  fps: 30
+  width: 640
+  height: 480
+  rotation: 180
+side:
+  type: opencv
+  index_or_path: /dev/lekiwi_side_webcam
+  fps: 30
+  width: 640
+  height: 480
+  # rotation: 90

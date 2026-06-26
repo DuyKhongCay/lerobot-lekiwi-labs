@@ -1,0 +1,5 @@
+robot:
+  # type: lekiwi
+  id: DuyKhongCay
+  port: /dev/ttyACM0
+  cameras: !include lekiwi_cameras.yaml
