@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import cv2
 
-from pi5_labs.cameras.grayscale_opencv import GrayscaleCamOpenCV, GrayscaleCamOpenCVConfig
+from lekiwi_labs.cameras.grayscale_opencv import GrayscaleCamOpenCV, GrayscaleCamOpenCVConfig
 from lerobot.cameras.configs import ColorMode
 
 class TestGrayscaleCamOpenCV(unittest.TestCase):
@@ -91,7 +91,7 @@ class TestGrayscaleCamOpenCV(unittest.TestCase):
         self.assertFalse(cam.is_connected)
 
     def test_make_cameras_from_configs(self):
-        from pi5_labs.cameras.grayscale_opencv import make_cameras_from_configs
+        from lekiwi_labs.cameras.grayscale_opencv import make_cameras_from_configs
         from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
         from lerobot.cameras.configs import CameraConfig
         
