@@ -54,11 +54,9 @@ from lerobot.robots.lekiwi.lekiwi_host import LeKiwiHost, LeKiwiServerConfig
 from lerobot.types import RobotAction
 
 # Import custom Grayscale camera configuration from either lekiwi_labs or pi5_labs
-from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig, make_cameras_from_configs as make_duy0cay_cameras
+from lekiwi_labs.cameras.duy0cay_opencv import make_cameras_from_configs as duy0cay_make_cameras
 
 
-
-@RobotConfig.register_subclass("lekiwi")
 class LeKiwi(OriginalLeKiwi):
     config_class = LeKiwiConfig
 
@@ -67,7 +65,7 @@ class LeKiwi(OriginalLeKiwi):
         # to use our custom make_duy0cay_cameras factory.
         import lerobot.robots.lekiwi.lekiwi as lekiwi_module
         original_make_cameras = lekiwi_module.make_cameras_from_configs
-        lekiwi_module.make_cameras_from_configs = make_duy0cay_cameras
+        lekiwi_module.make_cameras_from_configs = duy0cay_make_cameras
         try:
             super().__init__(config)
         finally:
@@ -157,7 +155,6 @@ class LeKiwi(OriginalLeKiwi):
             super().calibrate()
 
 
-@RobotConfig.register_subclass("lekiwi_client")
 class LeKiwiClient(OriginalLeKiwiClient):
     config_class = LeKiwiClientConfig
 
