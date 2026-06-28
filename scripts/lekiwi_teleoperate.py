@@ -41,7 +41,7 @@ sys.path.append(str(uarm_leader_dir))
 from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient
 from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig as OriginalTeleoperateConfig
 from lerobot.teleoperators.config import TeleoperatorConfig
-from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop, KeyboardTeleopConfig
+from lekiwi_labs.teleoperates.keyboard.teleop_keyboard import KeyboardOmniTeleop, KeyboardOmniTeleopConfig
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
@@ -50,18 +50,18 @@ from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
 class TeleoperateConfig(OriginalTeleoperateConfig):
     # Use UarmLeaderConfig imported from uarm_leader_config1.py
     teleop: TeleoperatorConfig = field(default_factory=lambda: UarmLeaderConfig(port="/dev/ttyUSB0"))
-    keyboard: KeyboardTeleopConfig = field(default_factory=KeyboardTeleopConfig)
+    keyboard: KeyboardOmniTeleopConfig = field(default_factory=KeyboardOmniTeleopConfig)
 
 @draccus.wrap()
 def main(cfg: TeleoperateConfig):
     # Initialize the robot, leader arm and keyboard teleoperators
     robot = LeKiwiClient(cfg.robot)
     leader_arm = UarmLeader(cfg.teleop)
-    keyboard = KeyboardTeleop(cfg.keyboard)
+    keyboard = KeyboardOmniTeleop(cfg.keyboard)
 
     # Connect to the robot, leader arm and keyboard
     # Make sure you have the host script running on the LeKiwi robot:
-    # python lekiwi_labs/scripts/lekiwi_host.py
+    # python lerobot/src/lerobot/robots/lekiwi/lekiwi_host.py
     print(f"Connecting to LeKiwi client at {cfg.robot.remote_ip}...")
     robot.connect()
     
@@ -92,11 +92,10 @@ def main(cfg: TeleoperateConfig):
             arm_action = {f"arm_{k}": v for k, v in arm_action.items()}
             
             # Get action from the keyboard
-            keyboard_keys = keyboard.get_action()
-            base_action = robot._from_keyboard_to_base_action(keyboard_keys)
+            base_action = keyboard.get_action()
 
             # Combine arm and base actions
-            action = {**arm_action, **base_action} if len(base_action) > 0 else arm_action
+            action = {**arm_action, **base_action}
 
             # Send the combined action to the robot
             _ = robot.send_action(action)
