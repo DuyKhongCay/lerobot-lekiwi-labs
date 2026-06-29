@@ -7,7 +7,11 @@
 #       --config_path lekiwi_labs/scripts/lekiwi_teleop.yaml \
 #       --robot.discover_packages_path=lekiwi_labs.cameras
 
-robot: !include lekiwi_robot.yaml   # shared connection config; edit it in one place
+robot: 
+  remote_ip: 192.168.1.6  # Robot IP address (change as needed, e.g., 172.18.134.136)
+  id: DuyKhongCay
+  polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
+  cameras: !include lekiwi_cameras.yaml
 
 teleop:
   type: uarm_leader

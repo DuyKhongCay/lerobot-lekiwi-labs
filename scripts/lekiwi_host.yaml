@@ -1,8 +1,4 @@
-robot:
-  # type: lekiwi
-  id: DuyKhongCay
-  port: /dev/ttyACM0
-  cameras: !include lekiwi_cameras.yaml
+robot: !include lekiwi_robot.yaml
 
 host:
   connection_time_s: 180

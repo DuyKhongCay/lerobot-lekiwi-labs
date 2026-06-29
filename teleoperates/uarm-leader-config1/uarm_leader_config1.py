@@ -1,20 +1,33 @@
+# Copyright 2026 The HuggingFace Inc. team and DuyKhongCay. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 #!/usr/bin/env python
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-import json
 import logging
-import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
-import serial
-
+from lerobot.motors.motors_bus import Motor, MotorCalibration, MotorNormMode
 from lerobot.teleoperators.config import TeleoperatorConfig
 from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.types import RobotAction
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
+
+logger = logging.getLogger(__name__)
 
 
 @TeleoperatorConfig.register_subclass("uarm_leader")
@@ -27,10 +40,10 @@ class UarmLeaderConfig(TeleoperatorConfig):
     timeout_s: float = 0.1
     command_delay_s: float = 0.008
 
-    # The original uarm.py reads seven servos numbered 0..6.
+    # The uarm leader reads seven servos numbered 0..6.
     servo_ids: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6)
 
-    # Original so100_teleop.py multiplies every offset by 1.5.
+    # Action multiplier scale
     action_scale: float = 1.5
 
     # Keep empty for SO100/SO101. Use "arm_" for LeKiwi-style action names.
@@ -42,11 +55,11 @@ class UarmLeaderConfig(TeleoperatorConfig):
     unlock_servos_on_connect: bool = True
     strict_reads: bool = False
     save_zero_angles: bool = False
+    use_degrees: bool = False
 
 
-logger = logging.getLogger(__name__)
-
-
+# Map joint names to uArm servo indexes and their signs.
+# Positive values represent scale and direction of movement relative to neutral position.
 JOINT_SERVO_TERMS: dict[str, tuple[tuple[int, float], ...]] = {
     "shoulder_pan": ((0, -1.0),),
     "shoulder_lift": ((1, 1.0),),
@@ -57,71 +70,8 @@ JOINT_SERVO_TERMS: dict[str, tuple[tuple[int, float], ...]] = {
 }
 
 
-class UarmSerialServoReader:
-    """Low-level reader for the uArm servo serial protocol used by the original scripts."""
-
-    def __init__(self, config: UarmLeaderConfig):
-        if len(config.servo_ids) != 7:
-            raise ValueError("Uarm_Leader_Config2 expects exactly 7 servo ids.")
-
-        self.config = config
-        self.ser: serial.Serial | None = None
-
-    @property
-    def is_connected(self) -> bool:
-        return self.ser is not None and self.ser.is_open
-
-    def connect(self) -> None:
-        self.ser = serial.Serial(self.config.port, self.config.baudrate, timeout=self.config.timeout_s)
-        logger.info("Opened uArm leader serial port %s", self.config.port)
-
-    @check_if_not_connected
-    def configure(self) -> None:
-        self.send_command("#000PVER!")
-        if self.config.unlock_servos_on_connect:
-            for servo_id in self.config.servo_ids:
-                self.send_command("#000PCSK!")
-                self.send_command(f"#{servo_id:03d}PULK!")
-
-    @check_if_not_connected
-    def send_command(self, command: str) -> str:
-        assert self.ser is not None
-        self.ser.write(command.encode("ascii"))
-        time.sleep(self.config.command_delay_s)
-        return self.ser.read_all().decode("ascii", errors="ignore")
-
-    def pwm_to_angle(self, response: str, servo_id: int) -> float | None:
-        pattern = rf"#{servo_id:03d}P(\d{{4}})"
-        match = re.search(pattern, response)
-        if match is None:
-            return None
-
-        pwm_value = int(match.group(1))
-        pwm_span = self.config.pwm_max - self.config.pwm_min
-        return (pwm_value - self.config.pwm_min) / pwm_span * self.config.angle_range_deg
-
-    @check_if_not_connected
-    def read_angles(self) -> list[float | None]:
-        angles: list[float | None] = []
-        for servo_id in self.config.servo_ids:
-            response = self.send_command(f"#{servo_id:03d}PRAD!")
-            angle = self.pwm_to_angle(response.strip(), servo_id)
-            if angle is None:
-                message = f"Servo {servo_id} response error: {response.strip()}"
-                if self.config.strict_reads:
-                    raise RuntimeError(message)
-                logger.warning(message)
-            angles.append(angle)
-        return angles
-
-    def disconnect(self) -> None:
-        if self.ser is not None and self.ser.is_open:
-            self.ser.close()
-        self.ser = None
-
-
 class Uarm_Leader(Teleoperator):
-    """LeRobot Teleoperator wrapper around the uArm leader serial reader."""
+    """LeRobot Teleoperator wrapper around the ZhongliMotorBus for uArm leader."""
 
     config_class = UarmLeaderConfig
     name = "uarm_leader"
@@ -129,10 +79,23 @@ class Uarm_Leader(Teleoperator):
     def __init__(self, config: UarmLeaderConfig):
         super().__init__(config)
         self.config = config
-        self.reader = UarmSerialServoReader(config)
-        self.zero_angles: list[float] | None = None
+
+        norm_mode = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
+        
+        # uArm has up to 7 servos (0 to 6).
+        # Define the motor dictionary expected by SerialMotorsBus.
+        motors = {
+            f"servo_{i}": Motor(i, "zhongli_servo", norm_mode)
+            for i in config.servo_ids
+        }
+
+        from lekiwi_labs.motors.zhongli.zhongli import ZhongliMotorBus
+        self.bus = ZhongliMotorBus(
+            port=config.port,
+            motors=motors,
+            calibration=self.calibration,
+        )
         self.logs: dict[str, float] = {}
-        self.zero_angles_fpath = self.calibration_dir / f"{self.id}_zero_angles.json"
 
     @property
     def action_features(self) -> dict[str, type]:
@@ -144,57 +107,68 @@ class Uarm_Leader(Teleoperator):
 
     @property
     def is_connected(self) -> bool:
-        return self.reader.is_connected
+        return self.bus.is_connected
 
     @property
     def is_calibrated(self) -> bool:
-        return self.zero_angles is not None and len(self.zero_angles) == len(self.config.servo_ids)
+        return self.bus.is_calibrated
 
     @check_if_already_connected
     def connect(self, calibrate: bool = True) -> None:
-        self.reader.connect()
-        self.configure()
-
-        if calibrate:
+        self.bus.connect()
+        if not self.is_calibrated and calibrate:
+            logger.info("Mismatch between calibration values in the motor and the calibration file or no calibration file found")
             self.calibrate()
-        elif self.zero_angles_fpath.is_file():
-            self._load_zero_angles()
-
         logger.info("%s connected.", self)
 
     @check_if_not_connected
     def calibrate(self) -> None:
-        raw_angles = self.reader.read_angles()
-        self.zero_angles = [angle if angle is not None else 0.0 for angle in raw_angles]
+        if self.calibration:
+            user_input = input(
+                f"Press ENTER to use provided calibration file associated with the id {self.id}, or type 'c' and press ENTER to run calibration: "
+            )
+            if user_input.strip().lower() != "c":
+                logger.info(f"Writing calibration file associated with the id {self.id} to the motors")
+                self.bus.write_calibration(self.calibration)
+                return
 
-        if self.config.save_zero_angles:
-            self._save_zero_angles()
+        logger.info(f"\nRunning calibration of {self}")
+        self.bus.disable_torque()
 
-        logger.info("uArm leader zero angles: %s", [round(angle, 2) for angle in self.zero_angles])
+        input(f"Move {self} to the middle of its range of motion and press ENTER....")
+        homing_offsets = self.bus.set_half_turn_homings()
 
-    @check_if_not_connected
-    def configure(self) -> None:
-        self.reader.configure()
+        print(
+            "Move all joints sequentially through their entire ranges of motion.\n"
+            "Recording positions. Press ENTER to stop..."
+        )
+        range_mins, range_maxes = self.bus.record_ranges_of_motion(list(self.bus.motors))
 
-    def get_action_offset(self) -> list[float]:
-        if not self.is_calibrated:
-            raise RuntimeError("Uarm_Leader_Config2 is not calibrated. Run `.calibrate()` first.")
+        self.calibration = {}
+        for motor, m in self.bus.motors.items():
+            self.calibration[motor] = MotorCalibration(
+                id=m.id,
+                drive_mode=0,
+                homing_offset=homing_offsets[motor],
+                range_min=range_mins[motor],
+                range_max=range_maxes[motor],
+            )
 
-        assert self.zero_angles is not None
-        raw_angles = self.reader.read_angles()
-        offsets: list[float] = []
-        for angle, zero_angle in zip(raw_angles, self.zero_angles, strict=True):
-            offsets.append(0.0 if angle is None else angle - zero_angle)
-        return offsets
+        self.bus.write_calibration(self.calibration)
+        self._save_calibration()
+        print(f"Calibration saved to {self.calibration_fpath}")
 
     @check_if_not_connected
     def get_action(self) -> RobotAction:
         start = time.perf_counter()
-        offsets = self.get_action_offset()
-
+        
+        # Read normalized positions from the bus (centered around 0)
+        positions = self.bus.sync_read("Present_Position")
+        
+        # Map servo values to joint positions
         action: dict[str, float] = {}
         for joint, terms in JOINT_SERVO_TERMS.items():
-            value = sum(offsets[index] * sign for index, sign in terms) * self.config.action_scale
+            value = sum(positions[f"servo_{index}"] * sign for index, sign in terms) * self.config.action_scale
             action[f"{self.config.action_prefix}{joint}.pos"] = value
 
         self.logs["read_action_dt_s"] = time.perf_counter() - start
@@ -203,40 +177,12 @@ class Uarm_Leader(Teleoperator):
     @check_if_not_connected
     def send_feedback(self, feedback: dict[str, Any]) -> None:
         if feedback:
-            raise ValueError("Uarm_Leader_Config1 does not support force or haptic feedback.")
+            raise ValueError("UarmLeader does not support force or haptic feedback.")
 
     @check_if_not_connected
     def disconnect(self) -> None:
-        self.reader.disconnect()
+        self.bus.disconnect()
         logger.info("%s disconnected.", self)
-
-    def _load_zero_angles(self) -> None:
-        with open(self.zero_angles_fpath) as f:
-            zero_angles = json.load(f)
-
-        if not isinstance(zero_angles, list) or len(zero_angles) != len(self.config.servo_ids):
-            raise ValueError(f"Invalid zero-angle calibration file: {self.zero_angles_fpath}")
-
-        self.zero_angles = [float(angle) for angle in zero_angles]
-
-    def _save_zero_angles(self) -> None:
-        assert self.zero_angles is not None
-        with open(self.zero_angles_fpath, "w") as f:
-            json.dump(self.zero_angles, f, indent=4)
 
 
 UarmLeader = Uarm_Leader
-
-def make_teleoperator_from_config(config: TeleoperatorConfig) -> "Teleoperator":
-    # TODO(Steven): Consider just using the make_device_from_device_class for all types
-    if config.type == "keyboard":
-        from .keyboard import KeyboardTeleop
-
-        return KeyboardTeleop(config)
-    elif config.type == "uarm_leader":
-        return UarmLeader(config)
-    else:
-        try:
-            return cast("Teleoperator", make_device_from_device_class(config))
-        except Exception as e:
-            raise ValueError(f"Error creating robot with config {config}: {e}") from e

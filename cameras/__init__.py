@@ -1,1 +1,1 @@
-from .duy0cay_opencv import GrayscaleOpenCVCam, GrayscaleOpenCVCamConfig
+from .grayscale_opencv import GrayscaleOpenCVCam, GrayscaleOpenCVCamConfig
