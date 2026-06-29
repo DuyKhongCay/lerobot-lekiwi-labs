@@ -38,6 +38,7 @@ uarm_leader_dir = project_dir / "lekiwi_labs" / "teleoperates" / "uarm-leader-co
 sys.path.append(str(uarm_leader_dir))
 
 # Import required modules
+from lerobot.robots import RobotConfig
 from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient
 from lerobot.scripts.lerobot_teleoperate import TeleoperateConfig as OriginalTeleoperateConfig
 from lerobot.teleoperators.config import TeleoperatorConfig
@@ -45,12 +46,18 @@ from lekiwi_labs.teleoperates.keyboard.teleop_keyboard import KeyboardOmniTeleop
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
+# Import custom camera config to register 'grayscale_opencv' type in CameraConfig registry
+# This must be imported BEFORE draccus parses the yaml config, otherwise it raises a KeyError
+from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig  # noqa: F401
 
 @dataclass
 class TeleoperateConfig(OriginalTeleoperateConfig):
     # Use UarmLeaderConfig imported from uarm_leader_config1.py
     teleop: TeleoperatorConfig = field(default_factory=lambda: UarmLeaderConfig(port="/dev/ttyUSB0"))
     keyboard: KeyboardOmniTeleopConfig = field(default_factory=KeyboardOmniTeleopConfig)
+    # Add a default value to avoid python dataclass inheritance order issues
+    # ('robot' in OriginalTeleoperateConfig has no default and follows 'teleop' which now has a default)
+    robot: RobotConfig = None
 
 @draccus.wrap()
 def main(cfg: TeleoperateConfig):
