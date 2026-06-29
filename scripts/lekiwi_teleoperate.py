@@ -45,10 +45,10 @@ from lerobot.teleoperators.config import TeleoperatorConfig
 from lekiwi_labs.teleoperates.keyboard.teleop_keyboard import KeyboardOmniTeleop, KeyboardOmniTeleopConfig
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
-from uarm_leader_config1 import UarmLeader, UarmLeaderConfig
+from lekiwi_labs.teleoperates.uarm_leader_config1 import UarmLeader, UarmLeaderConfig
 # Import custom camera config to register 'grayscale_opencv' type in CameraConfig registry
 # This must be imported BEFORE draccus parses the yaml config, otherwise it raises a KeyError
-from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig  # noqa: F401
+from lekiwi_labs.cameras.grayscale_opencv import GrayscaleOpenCVCamConfig  # noqa: F401
 
 @dataclass
 class TeleoperateConfig(OriginalTeleoperateConfig):
