@@ -89,7 +89,7 @@ class Uarm_Leader(Teleoperator):
             for i in config.servo_ids
         }
 
-        from lekiwi_labs.motors.zhongli.zhongli import ZhongliMotorBus
+        from lekiwi_labs.motors.zhongli import ZhongliMotorBus
         self.bus = ZhongliMotorBus(
             port=config.port,
             motors=motors,
