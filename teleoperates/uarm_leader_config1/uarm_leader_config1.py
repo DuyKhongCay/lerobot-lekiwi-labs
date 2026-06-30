@@ -161,6 +161,12 @@ class UarmLeader(Teleoperator):
         self._save_calibration()
         print(f"Calibration saved to {self.calibration_fpath}")
 
+    def setup_motors(self) -> None:
+        for motor in reversed(self.bus.motors):
+            input(f"Connect the controller board to the '{motor}' motor only and press enter.")
+            self.bus.setup_motor(motor)
+            print(f"'{motor}' motor id set to {self.bus.motors[motor].id}")
+
     @check_if_not_connected
     def get_action(self) -> RobotAction:
         start = time.perf_counter()
