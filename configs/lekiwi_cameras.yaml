@@ -1,14 +1,14 @@
 # Shared camera configuration for LeKiwi robot
 wrist:
   type: grayscale_opencv
-  index_or_path: /dev/lekiwi_wrist_cam
+  index_or_path: /dev/video2
   fps: 30
   width: 640
   height: 480
   rotation: 180
 side:
   type: opencv
-  index_or_path: /dev/lekiwi_side_webcam
+  index_or_path: /dev/video0
   fps: 30
   width: 480
   height: 640
