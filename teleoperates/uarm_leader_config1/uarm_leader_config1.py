@@ -118,7 +118,11 @@ class UarmLeader(Teleoperator):
         if not self.is_calibrated and calibrate:
             logger.info("Mismatch between calibration values in the motor and the calibration file or no calibration file found")
             self.calibrate()
+        self.configure()
         logger.info("%s connected.", self)
+
+    def configure(self) -> None:
+        self.bus.configure_motors()
 
     @check_if_not_connected
     def calibrate(self) -> None:

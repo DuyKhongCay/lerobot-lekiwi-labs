@@ -82,11 +82,17 @@ class ZhongliMotorBus(SerialMotorsBus):
     def _assert_protocol_is_compatible(self, instruction_name: str) -> None:
         pass
 
-    def _handshake(self) -> None:
-        # Check connection by querying the board version
-        res = self.send_command("#000PVER!")
-        if not res:
-            raise RuntimeError("Zhongli uArm board handshake failed: no response")
+    def _handshake(self, max_retries: int = 5, retry_delay_s: float = 0.3) -> None:
+        # Flush any leftover bytes from the input buffer before handshaking
+        self.ser.reset_input_buffer()
+        for attempt in range(max_retries):
+            res = self.send_command("#000PVER!")
+            if res and res.strip():
+                logger.info("Zhongli uArm handshake OK (attempt %d): %s", attempt + 1, res.strip())
+                return
+            logger.debug("Handshake attempt %d/%d: no response, retrying...", attempt + 1, max_retries)
+            time.sleep(retry_delay_s)
+        raise RuntimeError("Zhongli uArm board handshake failed: no response after %d attempts" % max_retries)
 
     def ping(self, motor: NameOrID, num_retry: int = 0, raise_on_error: bool = False) -> int | None:
         id_ = self._get_motor_id(motor)
@@ -115,6 +121,9 @@ class ZhongliMotorBus(SerialMotorsBus):
         try:
             self.ser = serial.Serial(self.port, self.default_baudrate, timeout=self.default_timeout / 1000.0)
             logger.info("Opened Zhongli/uArm serial port %s", self.port)
+            # PL2303 and similar USB-serial adapters may reset the device on open;
+            # wait for the board to finish booting before sending commands.
+            time.sleep(1.5)
             if handshake:
                 self._handshake()
             self.configure_motors()
@@ -152,6 +161,22 @@ class ZhongliMotorBus(SerialMotorsBus):
             self.send_command("#000PCSK!")
             self.send_command(f"#{m_id:03d}PULK!")
 
+    def _disable_torque(self, motor: int, model: str, num_retry: int = 0) -> None:
+        self.send_command("#000PCSK!")
+        self.send_command(f"#{motor:03d}PULK!")
+
+    def _find_single_motor(self, motor: str, initial_baudrate: int | None = None) -> tuple[int, int]:
+        model = self.motors[motor].model
+        search_baudrates = (
+            [initial_baudrate] if initial_baudrate is not None else self.available_baudrates
+        )
+        for baudrate in search_baudrates:
+            id_model = self.broadcast_ping()
+            if id_model:
+                found_id = next(iter(id_model.keys()))
+                return baudrate, found_id
+        raise RuntimeError(f"Motor '{motor}' (model '{model}') was not found. Make sure it is connected.")
+
     def enable_torque(self, motors: NameOrID | list[NameOrID] | None = None, num_retry: int = 0) -> None:
         # Writing goal position automatically locks/enables torque on uArm
         motor_names = self._get_motors_list(motors)
@@ -167,6 +192,10 @@ class ZhongliMotorBus(SerialMotorsBus):
         self.ser.write(command.encode("ascii"))
         time.sleep(self.command_delay_s)
         return self.ser.read_all().decode("ascii", errors="ignore")
+
+    @property
+    def is_connected(self) -> bool:
+        return self.ser is not None and self.ser.is_open
 
     @property
     def is_calibrated(self) -> bool:
