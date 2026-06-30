@@ -14,7 +14,7 @@ robot:
   polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
   cameras: !include lekiwi_cameras.yaml
 
-: !include lekiwi_leader.yaml
+teleop: !include lekiwi_leader.yaml
 
 fps: 30
 display_data: true
