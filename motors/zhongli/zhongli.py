@@ -42,7 +42,9 @@ class ZhongliMotorBus(SerialMotorsBus):
     default_timeout = 100  # ms
 
     model_baudrate_table = {
-        "zhongli_servo": [115200],
+        "zhongli_servo": {
+            115200: 5,
+        }
     }
     model_ctrl_table = {
         "zhongli_servo": {
@@ -52,6 +54,8 @@ class ZhongliMotorBus(SerialMotorsBus):
             "Min_Position_Limit": (4, 2),
             "Max_Position_Limit": (5, 2),
             "Torque_Enable": (6, 1),
+            "ID": (7, 1),
+            "Baud_Rate": (8, 1),
         }
     }
     model_encoding_table = {}
@@ -100,6 +104,13 @@ class ZhongliMotorBus(SerialMotorsBus):
                 responding[m_id] = 1
         return responding
 
+    @property
+    def is_connected(self) -> bool:
+        return self.ser is not None and self.ser.is_open
+
+    def _connect(self, handshake: bool = True) -> None:
+        self.connect(handshake=handshake)
+
     def connect(self, handshake: bool = True) -> None:
         try:
             self.ser = serial.Serial(self.port, self.default_baudrate, timeout=self.default_timeout / 1000.0)
@@ -117,6 +128,18 @@ class ZhongliMotorBus(SerialMotorsBus):
             self.ser.close()
         self.ser = None
         logger.info("ZhongliMotorBus disconnected.")
+
+    def get_baudrate(self) -> int:
+        if self.ser is None or not self.ser.is_open:
+            raise RuntimeError("ZhongliMotorBus is not connected.")
+        return self.ser.baudrate
+
+    def set_baudrate(self, baudrate: int) -> None:
+        if self.ser is None or not self.ser.is_open:
+            raise RuntimeError("ZhongliMotorBus is not connected.")
+        if self.ser.baudrate != baudrate:
+            logger.info("Setting bus baud rate to %d. Previously %d.", baudrate, self.ser.baudrate)
+            self.ser.baudrate = baudrate
 
     def configure_motors(self) -> None:
         # Unlock all servos so they can be moved freely by default (disable torque)
@@ -179,7 +202,7 @@ class ZhongliMotorBus(SerialMotorsBus):
             self.calibration = calibration_dict
 
     def _read(self, address: int, length: int, motor_id: int, **kwargs) -> tuple[int, int, int]:
-        motor_name = self._id_to_name(motor_id)
+        motor_name = self._id_to_name_dict.get(motor_id)
         
         if address == 1:  # Present_Position
             response = self.send_command(f"#{motor_id:03d}PRAD!")
@@ -190,7 +213,7 @@ class ZhongliMotorBus(SerialMotorsBus):
             raw_pwm = int(match.group(1))
             
             # Apply homing offset
-            homing_offset = self.calibration[motor_name].homing_offset if motor_name in self.calibration else 0
+            homing_offset = self.calibration[motor_name].homing_offset if (motor_name and motor_name in self.calibration) else 0
             value = raw_pwm - homing_offset
             return value, 0, 0
             
@@ -199,26 +222,26 @@ class ZhongliMotorBus(SerialMotorsBus):
             return value, 0, 0
             
         elif address == 3:  # Homing_Offset
-            value = self.calibration[motor_name].homing_offset if motor_name in self.calibration else 0
+            value = self.calibration[motor_name].homing_offset if (motor_name and motor_name in self.calibration) else 0
             return value, 0, 0
             
         elif address == 4:  # Min_Position_Limit
-            value = self.calibration[motor_name].range_min if motor_name in self.calibration else 0
+            value = self.calibration[motor_name].range_min if (motor_name and motor_name in self.calibration) else 0
             return value, 0, 0
             
         elif address == 5:  # Max_Position_Limit
-            value = self.calibration[motor_name].range_max if motor_name in self.calibration else 4095
+            value = self.calibration[motor_name].range_max if (motor_name and motor_name in self.calibration) else 4095
             return value, 0, 0
             
         else:
             raise NotImplementedError(f"Unsupported read address {address}")
 
     def _write(self, addr: int, length: int, motor_id: int, value: int, **kwargs) -> tuple[int, int]:
-        motor_name = self._id_to_name(motor_id)
+        motor_name = self._id_to_name_dict.get(motor_id)
         
         if addr == 2:  # Goal_Position
             self._last_goals[motor_id] = value
-            homing_offset = self.calibration[motor_name].homing_offset if motor_name in self.calibration else 0
+            homing_offset = self.calibration[motor_name].homing_offset if (motor_name and motor_name in self.calibration) else 0
             pwm_val = int(value + homing_offset)
             pwm_val = max(500, min(2500, pwm_val))  # clamp to safe range
             self.send_command(f"#{motor_id:03d}P{pwm_val:04d}")
@@ -228,10 +251,22 @@ class ZhongliMotorBus(SerialMotorsBus):
             return 0, 0
             
         elif addr == 6:  # Torque_Enable
+            if not motor_name:
+                raise ValueError(f"Cannot enable/disable torque for unregistered motor ID {motor_id}")
             if value == 1:
                 self.enable_torque(motor_name)
             else:
                 self.disable_torque(motor_name)
+            return 0, 0
+            
+        elif addr == 7:  # ID
+            # Send set ID command, e.g. #000PID001! to set ID to 1
+            self.send_command(f"#{motor_id:03d}PID{value:03d}!")
+            return 0, 0
+            
+        elif addr == 8:  # Baud_Rate
+            # Send set baud rate command, e.g. #001PBD5!
+            self.send_command(f"#{motor_id:03d}PBD{value}!")
             return 0, 0
             
         else:
@@ -252,6 +287,36 @@ class ZhongliMotorBus(SerialMotorsBus):
 
     def _split_into_byte_chunks(self, value: int, length: int) -> list[int]:
         return [value]
+
+    def _find_single_motor(self, motor: str, initial_baudrate: int | None = None) -> tuple[int, int]:
+        """Find a single motor connected on the serial bus."""
+        model = self.motors[motor].model
+        search_baudrates = (
+            [initial_baudrate] if initial_baudrate is not None else list(self.model_baudrate_table[model].keys())
+        )
+
+        for baudrate in search_baudrates:
+            self.set_baudrate(baudrate)
+            
+            # Method 1: Try broadcast read ID (#255PID!) since only one motor is connected during setup.
+            response = self.send_command("#255PID!")
+            if response:
+                match = re.search(r"#(\d{3})P", response)
+                if match:
+                    found_id = int(match.group(1))
+                    if self.ping(found_id) is not None:
+                        return baudrate, found_id
+
+            # Method 2: Fallback to sequential scanning if broadcast fails
+            for id_ in range(254):
+                if self.ping(id_) is not None:
+                    return baudrate, id_
+
+        raise RuntimeError(f"Motor '{motor}' (model '{model}') was not found. Make sure it is connected.")
+
+    def _disable_torque(self, motor: int, model: str, num_retry: int = 0) -> None:
+        """Disable torque on a specific motor ID."""
+        self.send_command(f"#{motor:03d}PULK!")
 
     def _sync_read(self, addr: int, length: int, motor_ids: list[int], **kwargs) -> tuple[dict[int, int], int]:
         values = {}

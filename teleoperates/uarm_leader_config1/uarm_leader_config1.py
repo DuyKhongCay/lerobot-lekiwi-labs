@@ -26,9 +26,9 @@ from lerobot.teleoperators.config import TeleoperatorConfig
 from lerobot.teleoperators.teleoperator import Teleoperator
 from lerobot.types import RobotAction
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
+from lekiwi_labs.motors.zhongli import ZhongliMotorBus
 
 logger = logging.getLogger(__name__)
-
 
 @TeleoperatorConfig.register_subclass("uarm_leader")
 @dataclass
@@ -55,7 +55,7 @@ class UarmLeaderConfig(TeleoperatorConfig):
     unlock_servos_on_connect: bool = True
     strict_reads: bool = False
     save_zero_angles: bool = False
-    use_degrees: bool = False
+    use_degrees: bool = True
 
 
 # Map joint names to uArm servo indexes and their signs.
@@ -70,7 +70,7 @@ JOINT_SERVO_TERMS: dict[str, tuple[tuple[int, float], ...]] = {
 }
 
 
-class Uarm_Leader(Teleoperator):
+class UarmLeader(Teleoperator):
     """LeRobot Teleoperator wrapper around the ZhongliMotorBus for uArm leader."""
 
     config_class = UarmLeaderConfig
@@ -89,10 +89,9 @@ class Uarm_Leader(Teleoperator):
             for i in config.servo_ids
         }
 
-        from lekiwi_labs.motors.zhongli import ZhongliMotorBus
         self.bus = ZhongliMotorBus(
             port=config.port,
-            motors=motors,
+            motors = motors,
             calibration=self.calibration,
         )
         self.logs: dict[str, float] = {}
@@ -183,6 +182,3 @@ class Uarm_Leader(Teleoperator):
     def disconnect(self) -> None:
         self.bus.disconnect()
         logger.info("%s disconnected.", self)
-
-
-UarmLeader = Uarm_Leader

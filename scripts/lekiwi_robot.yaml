@@ -1,5 +1,0 @@
-# LeKiwi robot configuration for LeKiwi
-# type: lekiwi
-port: /dev/ttyACM0
-id: DuyKhongCay
-# camera: !include lekiwi_cameras.yaml

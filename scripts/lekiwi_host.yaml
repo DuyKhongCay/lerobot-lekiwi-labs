@@ -1,4 +1,0 @@
-robot: !include lekiwi_robot.yaml
-
-host:
-  connection_time_s: 180

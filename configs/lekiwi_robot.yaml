@@ -1,0 +1,7 @@
+# LeKiwi robot configuration for LeKiwi
+teleop:
+  type: lekiwi
+  port: /dev/ttyACM0
+  id: DuyKhongCay
+
+cameras: !include lekiwi_cameras.yaml
