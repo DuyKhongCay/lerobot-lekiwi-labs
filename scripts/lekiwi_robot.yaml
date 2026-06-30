@@ -1,9 +1,0 @@
-# LeKiwi connection configuration for LeKiwiClient
-# 'type' key is required by draccus to identify the correct RobotConfig subclass
-
-type: lekiwi_client
-
-remote_ip: 192.168.1.6  # Robot IP address (change as needed, e.g., 172.18.134.136)
-
-polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
-cameras: !include lekiwi_cameras.yaml

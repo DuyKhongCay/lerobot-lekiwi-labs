@@ -38,7 +38,7 @@ from pprint import pformat
 import draccus
 
 # Import custom camera class for grayscale cameras
-from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCam
+from lekiwi_labs.cameras.grayscale_opencv import GrayscaleOpenCVCam
 
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 from lerobot.utils.errors import DeviceNotConnectedError

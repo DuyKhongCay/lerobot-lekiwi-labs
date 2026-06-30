@@ -1,0 +1,6 @@
+robot: 
+  port: /dev/ttyACM0
+  id: DuyKhongCay
+
+host:
+  connection_time_s: 180

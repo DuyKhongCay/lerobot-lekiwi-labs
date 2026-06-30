@@ -16,12 +16,13 @@
 
 """
 Helper to find the camera devices available in your system, supporting both OpenCV, RealSense,
-and Grayscale OpenCV cameras.
+and Grayscale OpenCV cameras. This script refactors the custom find-cameras logic by import
+and monkey-patching the original lerobot_find_cameras.py script.
 
 Example:
 
 ```shell
-python pi5_labs/scripts/lekiwi_find_cameras.py
+python lekiwi_labs/scripts/lekiwi_find_cameras.py
 ```
 """
 
@@ -37,31 +38,25 @@ if lerobot_src_dir.exists():
     sys.path.append(str(lerobot_src_dir))
 
 import argparse
-import concurrent.futures
 import logging
-import time
 import subprocess
-import re
 from typing import Any
 
-import cv2  # type: ignore
 import numpy as np
-from PIL import Image
 
 from lerobot.cameras.configs import ColorMode
 from lerobot.cameras.opencv.camera_opencv import OpenCVCamera
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
-from lerobot.utils.errors import DeviceNotConnectedError
 
 # Import custom camera configuration
-from lekiwi_labs.cameras.duy0cay_opencv import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam
+from lekiwi_labs.cameras.grayscale_opencv import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam
 
+# Import the original lerobot script to monkey-patch it
+import lerobot.scripts.lerobot_find_cameras as lfc
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def get_real_video_devices() -> list[str] | None:
@@ -106,7 +101,7 @@ def find_all_opencv_cameras() -> list[dict[str, Any]]:
         A list of all available OpenCV cameras with their metadata.
     """
     all_opencv_cameras_info: list[dict[str, Any]] = []
-    logger.info("Searching for OpenCV cameras...")
+    logger.info("Searching for OpenCV cameras (patched with lekiwi filters)...")
     try:
         # Get real camera paths filtered by v4l2-ctl
         real_devices = get_real_video_devices()
@@ -166,106 +161,13 @@ def find_all_opencv_cameras() -> list[dict[str, Any]]:
     return all_opencv_cameras_info
 
 
-def find_all_realsense_cameras() -> list[dict[str, Any]]:
-    """
-    Finds all available RealSense cameras plugged into the system.
-
-    Returns:
-        A list of all available RealSense cameras with their metadata.
-    """
-    all_realsense_cameras_info: list[dict[str, Any]] = []
-    logger.info("Searching for RealSense cameras...")
-    try:
-        realsense_cameras = RealSenseCamera.find_cameras()
-        for cam_info in realsense_cameras:
-            all_realsense_cameras_info.append(cam_info)
-        logger.info(f"Found {len(realsense_cameras)} RealSense cameras.")
-    except ImportError:
-        logger.warning("Skipping RealSense camera search: pyrealsense2 library not found or not importable.")
-    except Exception as e:
-        logger.error(f"Error finding RealSense cameras: {e}")
-
-    return all_realsense_cameras_info
-
-
-def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[str, Any]]:
-    """
-    Finds available cameras based on an optional filter and prints their information.
-
-    Args:
-        camera_type_filter: Optional string to filter cameras ("realsense", "opencv", or "grayscale_opencv").
-                            If None, lists all cameras.
-
-    Returns:
-        A list of all available cameras matching the filter, with their metadata.
-    """
-    all_cameras_info: list[dict[str, Any]] = []
-
-    if camera_type_filter:
-        camera_type_filter = camera_type_filter.lower()
-
-    if camera_type_filter is None or camera_type_filter in ["opencv", "grayscale_opencv"]:
-        opencv_cams = find_all_opencv_cameras()
-        if camera_type_filter == "opencv":
-            opencv_cams = [c for c in opencv_cams if c["type"] == "OpenCV"]
-        elif camera_type_filter == "grayscale_opencv":
-            opencv_cams = [c for c in opencv_cams if c["type"] == "GrayscaleOpenCV"]
-        all_cameras_info.extend(opencv_cams)
-        
-    if camera_type_filter is None or camera_type_filter == "realsense":
-        all_cameras_info.extend(find_all_realsense_cameras())
-
-    if not all_cameras_info:
-        if camera_type_filter:
-            logger.warning(f"No {camera_type_filter} cameras were detected.")
-        else:
-            logger.warning("No cameras (OpenCV, GrayscaleOpenCV, or RealSense) were detected.")
-    else:
-        print("\n--- Detected Cameras ---")
-        for i, cam_info in enumerate(all_cameras_info):
-            print(f"Camera #{i}:")
-            for key, value in cam_info.items():
-                if key == "default_stream_profile" and isinstance(value, dict):
-                    print(f"  {key.replace('_', ' ').capitalize()}:")
-                    for sub_key, sub_value in value.items():
-                        print(f"    {sub_key.capitalize()}: {sub_value}")
-                else:
-                    print(f"  {key.replace('_', ' ').capitalize()}: {value}")
-            print("-" * 20)
-    return all_cameras_info
-
-
-def save_image(
-    img_array: np.ndarray,
-    camera_identifier: str | int,
-    images_dir: Path,
-    camera_type: str,
-):
-    """
-    Saves a single image to disk using Pillow. Handles color conversion if necessary.
-    """
-    try:
-        img = Image.fromarray(img_array, mode="RGB")
-
-        safe_identifier = str(camera_identifier).replace("/", "_").replace("\\", "_")
-        filename_prefix = f"{camera_type.lower()}_{safe_identifier}"
-        filename = f"{filename_prefix}.png"
-
-        path = images_dir / filename
-        path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(str(path))
-        logger.info(f"Saved image: {path}")
-    except Exception as e:
-        logger.error(f"Failed to save image for camera {camera_identifier} (type {camera_type}): {e}")
-
-
 def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
-    """Create and connect to a camera instance based on metadata."""
+    """Create and connect to a camera instance based on metadata (patched for GrayscaleOpenCV support)."""
     cam_type = cam_meta.get("type")
     cam_id = cam_meta.get("id")
     instance = None
 
-    logger.info(f"Preparing {cam_type} ID {cam_id} with default profile")
+    logger.info(f"Preparing {cam_type} ID {cam_id} with default profile (patched)")
 
     try:
         if cam_type == "OpenCV":
@@ -301,101 +203,50 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def process_camera_image(
-    cam_dict: dict[str, Any], output_dir: Path, current_time: float
-) -> concurrent.futures.Future | None:
-    """Capture and process an image from a single camera."""
-    cam = cam_dict["instance"]
-    meta = cam_dict["meta"]
-    cam_type_str = str(meta.get("type", "unknown"))
-    cam_id_str = str(meta.get("id", "unknown"))
-
-    try:
-        image_data = cam.read()
-
-        return save_image(
-            image_data,
-            cam_id_str,
-            output_dir,
-            cam_type_str,
-        )
-    except TimeoutError:
-        logger.warning(
-            f"Timeout reading from {cam_type_str} camera {cam_id_str} at time {current_time:.2f}s."
-        )
-    except Exception as e:
-        logger.error(f"Error reading from {cam_type_str} camera {cam_id_str}: {e}")
-    return None
-
-
-def cleanup_cameras(cameras_to_use: list[dict[str, Any]]):
-    """Disconnect all cameras."""
-    logger.info(f"Disconnecting {len(cameras_to_use)} cameras...")
-    for cam_dict in cameras_to_use:
-        try:
-            if cam_dict["instance"] and cam_dict["instance"].is_connected:
-                cam_dict["instance"].disconnect()
-        except Exception as e:
-            logger.error(f"Error disconnecting camera {cam_dict['meta'].get('id')}: {e}")
-
-
-def save_images_from_all_cameras(
-    output_dir: Path,
-    record_time_s: float = 2.0,
-    camera_type: str | None = None,
-):
+def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[str, Any]]:
     """
-    Connects to detected cameras (optionally filtered by type) and saves images from each.
-    Uses default stream profiles for width, height, and FPS.
-
-    Args:
-        output_dir: Directory to save images.
-        record_time_s: Duration in seconds to record images.
-        camera_type: Optional string to filter cameras ("realsense", "opencv", or "grayscale_opencv").
-                            If None, uses all detected cameras.
+    Finds available cameras based on an optional filter and prints their information (patched).
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving images to {output_dir}")
-    all_camera_metadata = find_and_print_cameras(camera_type_filter=camera_type)
+    all_cameras_info: list[dict[str, Any]] = []
 
-    if not all_camera_metadata:
-        logger.warning("No cameras detected matching the criteria. Cannot save images.")
-        return
+    if camera_type_filter:
+        camera_type_filter = camera_type_filter.lower()
 
-    cameras_to_use = []
-    for cam_meta in all_camera_metadata:
-        camera_instance = create_camera_instance(cam_meta)
-        if camera_instance:
-            cameras_to_use.append(camera_instance)
+    if camera_type_filter is None or camera_type_filter in ["opencv", "grayscale_opencv"]:
+        opencv_cams = find_all_opencv_cameras()
+        if camera_type_filter == "opencv":
+            opencv_cams = [c for c in opencv_cams if c["type"] == "OpenCV"]
+        elif camera_type_filter == "grayscale_opencv":
+            opencv_cams = [c for c in opencv_cams if c["type"] == "GrayscaleOpenCV"]
+        all_cameras_info.extend(opencv_cams)
+        
+    if camera_type_filter is None or camera_type_filter == "realsense":
+        all_cameras_info.extend(lfc.find_all_realsense_cameras())
 
-    if not cameras_to_use:
-        logger.warning("No cameras could be connected. Aborting image save.")
-        return
+    if not all_cameras_info:
+        if camera_type_filter:
+            logger.warning(f"No {camera_type_filter} cameras were detected.")
+        else:
+            logger.warning("No cameras (OpenCV, GrayscaleOpenCV, or RealSense) were detected.")
+    else:
+        print("\n--- Detected Cameras ---")
+        for i, cam_info in enumerate(all_cameras_info):
+            print(f"Camera #{i}:")
+            for key, value in cam_info.items():
+                if key == "default_stream_profile" and isinstance(value, dict):
+                    print(f"  {key.replace('_', ' ').capitalize()}:")
+                    for sub_key, sub_value in value.items():
+                        print(f"    {sub_key.capitalize()}: {sub_value}")
+                else:
+                    print(f"  {key.replace('_', ' ').capitalize()}: {value}")
+            print("-" * 20)
+    return all_cameras_info
 
-    logger.info(f"Starting image capture for {record_time_s} seconds from {len(cameras_to_use)} cameras.")
-    start_time = time.perf_counter()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(cameras_to_use) * 2) as executor:
-        try:
-            while time.perf_counter() - start_time < record_time_s:
-                futures = []
-                current_capture_time = time.perf_counter()
-
-                for cam_dict in cameras_to_use:
-                    future = process_camera_image(cam_dict, output_dir, current_capture_time)
-                    if future:
-                        futures.append(future)
-
-                if futures:
-                    concurrent.futures.wait(futures)
-
-        except KeyboardInterrupt:
-            logger.info("Capture interrupted by user.")
-        finally:
-            print("\nFinalizing image saving...")
-            executor.shutdown(wait=True)
-            cleanup_cameras(cameras_to_use)
-            print(f"Image capture finished. Images saved to {output_dir}")
+# Apply Monkey Patches to the original lerobot script
+lfc.find_all_opencv_cameras = find_all_opencv_cameras
+lfc.create_camera_instance = create_camera_instance
+lfc.find_and_print_cameras = find_and_print_cameras
 
 
 def main():
@@ -425,7 +276,9 @@ def main():
         help="Time duration to attempt capturing frames. Default: 6 seconds.",
     )
     args = parser.parse_args()
-    save_images_from_all_cameras(**vars(args))
+    
+    # Run the original save function which now uses our patched callbacks
+    lfc.save_images_from_all_cameras(**vars(args))
 
 
 if __name__ == "__main__":
