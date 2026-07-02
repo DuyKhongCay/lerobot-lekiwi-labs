@@ -107,6 +107,7 @@ celerybeat.pid
 
 # Other
 *~
+.pdf
 
 ### OS Specific ###
 # macOS

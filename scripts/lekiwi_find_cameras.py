@@ -51,7 +51,8 @@ from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 
 # Import custom camera configuration
-from lekiwi_labs.cameras.grayscale_opencv import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam
+from lekiwi_labs.cameras import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam, IMX219StereoCamera, IMX219StereoCameraConfig  
+
 
 # Import the original lerobot script to monkey-patch it
 import lerobot.scripts.lerobot_find_cameras as lfc
@@ -75,8 +76,8 @@ def get_real_video_devices() -> list[str] | None:
                 continue
             if not line.startswith("\t") and not line.startswith(" "):
                 group_name = line.lower()
-                # Exclude platform ISP backends and codecs
-                if any(k in group_name for k in ["pisp_be", "pispbe", "hevc-dec", "bcm2835", "rp1-cfe"]):
+                # Exclude platform ISP backends, codecs, and CSI ports
+                if any(k in group_name for k in ["pisp_be", "pispbe", "hevc-dec", "bcm2835", "csi", "rp1-cfe"]):
                     current_group_is_ignored = True
                 else:
                     current_group_is_ignored = False
@@ -161,6 +162,33 @@ def find_all_opencv_cameras() -> list[dict[str, Any]]:
     return all_opencv_cameras_info
 
 
+def find_all_stereo_cameras() -> list[dict[str, Any]]:
+    """
+    Finds all available IMX219 Stereo cameras using Picamera2 wrapper.
+    """
+    cameras = []
+    logger.info("Searching for IMX219 Stereo cameras (using Picamera2)...")
+    try:
+        raw_info = IMX219StereoCamera.find_cameras()
+        if len(raw_info) >= 2:
+            cameras.append({
+                "id": "imx219_stereo",
+                "type": "imx219_stereo",
+                "name": f"IMX219 Stereo Camera (Picamera2) - server:{raw_info[0].get('index', 0)} / client:{raw_info[1].get('index', 1)}",
+                "default_stream_profile": {
+                    "width": 640,
+                    "height": 480,
+                    "fps": 30,
+                }
+            })
+            logger.info(f"Found IMX219 Stereo camera pair: server index {raw_info[0].get('index', 0)}, client index {raw_info[1].get('index', 1)}.")
+        elif len(raw_info) > 0:
+            logger.warning(f"Found only {len(raw_info)} CSI camera(s) via Picamera2. At least 2 are required for IMX219 Stereo Camera.")
+    except Exception as e:
+        logger.debug(f"Error checking for IMX219 Stereo cameras: {e}")
+    return cameras
+
+
 def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
     """Create and connect to a camera instance based on metadata (patched for GrayscaleOpenCV support)."""
     cam_type = cam_meta.get("type")
@@ -189,8 +217,31 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
             )
             instance = RealSenseCamera(rs_config)
         else:
-            logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
-            return None
+            # Try to dynamically instantiate using lerobot's ChoiceRegistry / make_device_from_device_class
+            from lerobot.utils.import_utils import make_device_from_device_class
+            from lerobot.cameras.configs import CameraConfig
+            import inspect
+
+            if cam_type:
+                choice_name = cam_type.lower()
+                try:
+                    config_cls = CameraConfig.get_choice_class(choice_name)
+                    # Determine appropriate initialization arguments based on signature
+                    sig = inspect.signature(config_cls)
+                    kwargs: dict[str, Any] = {"color_mode": ColorMode.RGB}
+                    if "index_or_path" in sig.parameters:
+                        kwargs["index_or_path"] = cam_id
+                    elif "serial_number_or_name" in sig.parameters:
+                        kwargs["serial_number_or_name"] = cam_id
+                    
+                    cfg = config_cls(**kwargs)
+                    instance = make_device_from_device_class(cfg)
+                except KeyError:
+                    logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
+                    return None
+            else:
+                logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
+                return None
 
         if instance:
             logger.info(f"Connecting to {cam_type} camera: {cam_id}...")
@@ -220,6 +271,10 @@ def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[s
             opencv_cams = [c for c in opencv_cams if c["type"] == "GrayscaleOpenCV"]
         all_cameras_info.extend(opencv_cams)
         
+    if camera_type_filter is None or camera_type_filter == "imx219_stereo":
+        stereo_cams = find_all_stereo_cameras()
+        all_cameras_info.extend(stereo_cams)
+
     if camera_type_filter is None or camera_type_filter == "realsense":
         all_cameras_info.extend(lfc.find_all_realsense_cameras())
 
@@ -260,8 +315,8 @@ def main():
         type=str,
         nargs="?",
         default=None,
-        choices=["realsense", "opencv", "grayscale_opencv"],
-        help="Specify camera type to capture from (e.g., 'realsense', 'opencv', 'grayscale_opencv'). Captures from all if omitted.",
+        choices=["realsense", "opencv", "grayscale_opencv", "imx219_stereo"],
+        help="Specify camera type to capture from (e.g., 'realsense', 'opencv', 'grayscale_opencv', 'imx219_stereo'). Captures from all if omitted.",
     )
     parser.add_argument(
         "--output-dir",

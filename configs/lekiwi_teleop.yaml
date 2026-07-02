@@ -1,20 +1,4 @@
-# LeKiwi teleoperation config for `lerobot-teleoperate`: SO101 leader arm drives the
-# arm, the auto-attached keyboard drives the base. No recording; Ctrl+C to stop
-# (or set teleop_time_s for a fixed duration).
-#
-# Run the following command from the workspace root:
-#   lerobot-teleoperate \
-#       --config_path lekiwi_labs/scripts/lekiwi_teleop.yaml \
-#       --robot.discover_packages_path=lekiwi_labs.cameras
-
-robot: 
-  type: lekiwi_client
-  remote_ip: 192.168.1.6  # Robot IP address (change as needed, e.g., 172.18.134.136)
+teleop:
+  type: uarm_leader
+  port: /dev/ttyUSB0
   id: DuyKhongCay
-  polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
-  cameras: !include lekiwi_cameras.yaml
-
-teleop: !include lekiwi_leader.yaml
-
-fps: 30
-display_data: true
