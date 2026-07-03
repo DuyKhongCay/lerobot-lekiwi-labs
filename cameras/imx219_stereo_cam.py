@@ -123,10 +123,7 @@ class IMX219StereoCameraConfig(CameraConfig):
     client_idx: int = 1
 
     # Image settings (applied to both cameras)
-    fps: int | None = 30
-    width: int | None = 640
-    height: int | None = 480
-    color_mode: ColorMode = ColorMode.RGB
+    color_mode: ColorMode = ColorMode.BGR
     rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
 
     # Sync & capture tuning
@@ -340,8 +337,8 @@ class IMX219StereoCamera(Camera):
         # Build camera configurations
         # ------------------------------------------------------------------
         pixel_format = _FORMAT_MAP[self.config.color_mode]
-        w, h = self.config.width or 640, self.config.height or 480
-        fps = float(self.config.fps or 30)
+        w, h = self.width or 640, self.height or 480
+        fps = float(self.fps or 30)
 
         server_ctrls = {
             "FrameRate": fps,
