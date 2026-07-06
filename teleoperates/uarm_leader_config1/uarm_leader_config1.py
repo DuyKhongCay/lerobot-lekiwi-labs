@@ -166,6 +166,18 @@ class UarmLeader(Teleoperator):
         input(f"Move {self} to the middle of its range of motion and press ENTER....")
         homing_offsets = self.bus.set_half_turn_homings()
 
+        # Update and write the new homing offsets to the bus before recording ranges of motion
+        temp_calibration = {}
+        for motor, m in self.bus.motors.items():
+            temp_calibration[motor] = MotorCalibration(
+                id=m.id,
+                drive_mode=0,
+                homing_offset=homing_offsets[motor],
+                range_min=0,
+                range_max=4095,
+            )
+        self.bus.write_calibration(temp_calibration)
+
         print(
             "Move all joints sequentially through their entire ranges of motion.\n"
             "Recording positions. Press ENTER to stop..."
