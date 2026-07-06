@@ -85,6 +85,8 @@ def main(cfg: TeleoperateConfig):
         raise ValueError("Robot, leader arm or keyboard teleop is not connected!")
 
     print("Starting teleop loop...")
+    prev_leader_servo6 = None
+    prev_follower_gripper = None
     try:
         while True:
             t0 = time.perf_counter()

@@ -56,6 +56,7 @@ class ZhongliMotorBus(SerialMotorsBus):
             "Torque_Enable": (6, 1),
             "ID": (7, 1),
             "Baud_Rate": (8, 1),
+            "Power_On_Torque_Mode": (9, 1),
         }
     }
     model_encoding_table = {}
@@ -296,6 +297,16 @@ class ZhongliMotorBus(SerialMotorsBus):
         elif addr == 8:  # Baud_Rate
             # Send set baud rate command, e.g. #001PBD5!
             self.send_command(f"#{motor_id:03d}PBD{value}!")
+            return 0, 0
+            
+        elif addr == 9:  # Power_On_Torque_Mode
+            # Value 0: Power-on torque release (#PCSM!)
+            # Value 1: Power-on torque restore (#PCSR!)
+            if value == 0:
+                self.send_command(f"#{motor_id:03d}PCSM!")
+            else:
+                self.send_command(f"#{motor_id:03d}PCSR!")
+            time.sleep(0.1)  # Allow time for EEPROM write on the servo
             return 0, 0
             
         else:
