@@ -51,7 +51,7 @@ from lerobot.cameras.realsense.camera_realsense import RealSenseCamera
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 
 # Import custom camera configuration
-from lekiwi_labs.cameras import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam, IMX219StereoCamera, IMX219StereoCameraConfig  
+from lekiwi_labs.cameras import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam, IMX219StereoCamera, IMX219StereoCameraConfig, IMX219SingleCamera, IMX219SingleCameraConfig  
 
 
 # Import the original lerobot script to monkey-patch it
@@ -162,30 +162,26 @@ def find_all_opencv_cameras() -> list[dict[str, Any]]:
     return all_opencv_cameras_info
 
 
-def find_all_stereo_cameras() -> list[dict[str, Any]]:
+def find_all_imx219_cameras() -> list[dict[str, Any]]:
     """
-    Finds all available IMX219 Stereo cameras using Picamera2 wrapper.
+    Finds all available IMX219 Single cameras using Picamera2 wrapper.
     """
     cameras = []
-    logger.info("Searching for IMX219 Stereo cameras (using Picamera2)...")
+    logger.info("Searching for IMX219 cameras (using Picamera2)...")
     try:
-        raw_info = IMX219StereoCamera.find_cameras()
-        if len(raw_info) >= 2:
+        raw_info = IMX219SingleCamera.find_cameras()
+        # Find single cameras
+        for cam in raw_info:
+            idx = cam.get("index", 0)
             cameras.append({
-                "id": "imx219_stereo",
-                "type": "imx219_stereo",
-                "name": f"IMX219 Stereo Camera (Picamera2) - server:{raw_info[0].get('index', 0)} / client:{raw_info[1].get('index', 1)}",
-                "default_stream_profile": {
-                    "width": 640,
-                    "height": 480,
-                    "fps": 30,
-                }
+                "id": f"imx219_single_{idx}",
+                "path": f"{cam["id"]}",
+                "type": "Imx219Single",
+                "name": f"IMX219 Single Camera (Picamera2) @ index {idx}",
             })
-            logger.info(f"Found IMX219 Stereo camera pair: server index {raw_info[0].get('index', 0)}, client index {raw_info[1].get('index', 1)}.")
-        elif len(raw_info) > 0:
-            logger.warning(f"Found only {len(raw_info)} CSI camera(s) via Picamera2. At least 2 are required for IMX219 Stereo Camera.")
+            logger.info(f"Found IMX219 Single camera: index {idx}.")
     except Exception as e:
-        logger.debug(f"Error checking for IMX219 Stereo cameras: {e}")
+        logger.debug(f"Error checking for IMX219 Single cameras: {e}")
     return cameras
 
 
@@ -198,55 +194,50 @@ def create_camera_instance(cam_meta: dict[str, Any]) -> dict[str, Any] | None:
     logger.info(f"Preparing {cam_type} ID {cam_id} with default profile (patched)")
 
     try:
-        if cam_type == "OpenCV":
-            cv_config = OpenCVCameraConfig(
-                index_or_path=cam_id,
-                color_mode=ColorMode.RGB,
-            )
-            instance = OpenCVCamera(cv_config)
-        elif cam_type == "GrayscaleOpenCV":
-            cv_config = GrayscaleOpenCVCamConfig(
-                index_or_path=cam_id,
-                color_mode=ColorMode.RGB,
-            )
-            instance = GrayscaleOpenCVCam(cv_config)
-        elif cam_type == "RealSense":
-            rs_config = RealSenseCameraConfig(
-                serial_number_or_name=cam_id,
-                color_mode=ColorMode.RGB,
-            )
-            instance = RealSenseCamera(rs_config)
-        else:
-            # Try to dynamically instantiate using lerobot's ChoiceRegistry / make_device_from_device_class
-            from lerobot.utils.import_utils import make_device_from_device_class
-            from lerobot.cameras.configs import CameraConfig
-            import inspect
+        from lerobot.utils.import_utils import make_device_from_device_class
+        from lerobot.cameras.configs import CameraConfig
+        import inspect
 
-            if cam_type:
-                choice_name = cam_type.lower()
+        if not cam_type:
+            logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
+            return None
+
+        try:
+            config_cls = CameraConfig.get_choice_class(cam_type.lower())
+        except KeyError:
+            logger.warning(f"Unknown camera type: {cam_type} (mapped: {cam_type.lower()}) for ID {cam_id}. Skipping.")
+            return None
+
+        # Build kwargs based on config class signature
+        sig = inspect.signature(config_cls)
+        kwargs: dict[str, Any] = {}
+
+        if "index_or_path" in sig.parameters:
+            kwargs["index_or_path"] = cam_id
+        elif "serial_number_or_name" in sig.parameters:
+            kwargs["serial_number_or_name"] = cam_id
+        elif "camera_idx" in sig.parameters:
+            # Extract integer index from id string like "imx219_single_0" -> 0
+            idx = 0
+            if isinstance(cam_id, str) and "_" in cam_id:
                 try:
-                    config_cls = CameraConfig.get_choice_class(choice_name)
-                    # Determine appropriate initialization arguments based on signature
-                    sig = inspect.signature(config_cls)
-                    kwargs: dict[str, Any] = {"color_mode": ColorMode.RGB}
-                    if "index_or_path" in sig.parameters:
-                        kwargs["index_or_path"] = cam_id
-                    elif "serial_number_or_name" in sig.parameters:
-                        kwargs["serial_number_or_name"] = cam_id
-                    
-                    cfg = config_cls(**kwargs)
-                    instance = make_device_from_device_class(cfg)
-                except KeyError:
-                    logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
-                    return None
-            else:
-                logger.warning(f"Unknown camera type: {cam_type} for ID {cam_id}. Skipping.")
-                return None
+                    idx = int(cam_id.split("_")[-1])
+                except ValueError:
+                    idx = 0
+            elif isinstance(cam_id, int):
+                idx = cam_id
+            kwargs["camera_idx"] = idx
+            # Skip warmup to avoid Picamera2 conflict when opening multiple cameras sequentially
+            kwargs["warmup_s"] = 0
+
+        cfg = config_cls(**kwargs)
+        instance = make_device_from_device_class(cfg)
 
         if instance:
             logger.info(f"Connecting to {cam_type} camera: {cam_id}...")
-            instance.connect(warmup=True)
+            instance.connect(warmup=False)
             return {"instance": instance, "meta": cam_meta}
+
     except Exception as e:
         logger.error(f"Failed to connect or configure {cam_type} camera {cam_id}: {e}")
         if instance and instance.is_connected:
@@ -263,7 +254,7 @@ def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[s
     if camera_type_filter:
         camera_type_filter = camera_type_filter.lower()
 
-    if camera_type_filter is None or camera_type_filter in ["opencv", "grayscale_opencv"]:
+    if camera_type_filter is None or camera_type_filter in ["opencv", "grayscaleopencv"]:
         opencv_cams = find_all_opencv_cameras()
         if camera_type_filter == "opencv":
             opencv_cams = [c for c in opencv_cams if c["type"] == "OpenCV"]
@@ -271,9 +262,9 @@ def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[s
             opencv_cams = [c for c in opencv_cams if c["type"] == "GrayscaleOpenCV"]
         all_cameras_info.extend(opencv_cams)
         
-    if camera_type_filter is None or camera_type_filter == "imx219_stereo":
-        stereo_cams = find_all_stereo_cameras()
-        all_cameras_info.extend(stereo_cams)
+    if camera_type_filter is None or camera_type_filter == "imx219single":
+        imx_cams = find_all_imx219_cameras()
+        all_cameras_info.extend(imx_cams)
 
     if camera_type_filter is None or camera_type_filter == "realsense":
         all_cameras_info.extend(lfc.find_all_realsense_cameras())
@@ -282,7 +273,7 @@ def find_and_print_cameras(camera_type_filter: str | None = None) -> list[dict[s
         if camera_type_filter:
             logger.warning(f"No {camera_type_filter} cameras were detected.")
         else:
-            logger.warning("No cameras (OpenCV, GrayscaleOpenCV, or RealSense) were detected.")
+            logger.warning("No cameras (OpenCV, IMX219, or RealSense) were detected.")
     else:
         print("\n--- Detected Cameras ---")
         for i, cam_info in enumerate(all_cameras_info):
@@ -315,8 +306,8 @@ def main():
         type=str,
         nargs="?",
         default=None,
-        choices=["realsense", "opencv", "grayscale_opencv", "imx219_stereo"],
-        help="Specify camera type to capture from (e.g., 'realsense', 'opencv', 'grayscale_opencv', 'imx219_stereo'). Captures from all if omitted.",
+        choices=["realsense", "opencv", "grayscale_opencv", "imx219_single"],
+        help="Specify camera type to capture from (e.g., 'realsense', 'opencv', 'grayscale_opencv', 'imx219_single'). Captures from all if omitted.",
     )
     parser.add_argument(
         "--output-dir",

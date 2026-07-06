@@ -150,6 +150,94 @@ def main(cfg: StreamConfig):
             return f"Camera '{cam_name}' not found.", 404
         return Response(generate_frames(cam_name), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+    # OpenCV property mapping for camera control
+    OPENCV_CAMERA_PROPERTIES = {
+        "brightness": cv2.CAP_PROP_BRIGHTNESS,
+        "contrast": cv2.CAP_PROP_CONTRAST,
+        "saturation": cv2.CAP_PROP_SATURATION,
+        "gain": cv2.CAP_PROP_GAIN,
+        "exposure": cv2.CAP_PROP_EXPOSURE,
+        "auto_exposure": cv2.CAP_PROP_AUTO_EXPOSURE
+    }
+
+    def get_camera_properties(camera):
+        """
+        Gets current values for all supported OpenCV camera properties.
+        """
+        # OpenCVCamera has 'videocapture' attribute
+        if not hasattr(camera, 'videocapture') or camera.videocapture is None:
+            return {}
+        
+        cap = camera.videocapture
+        settings: dict[str, float | None] = {}
+        for name, prop_id in OPENCV_CAMERA_PROPERTIES.items():
+            try:
+                val = cap.get(prop_id)
+                # Ensure we return clean Python types (float/int) rather than numpy types
+                settings[name] = float(val) if val is not None else None
+            except Exception as e:
+                logger.debug(f"Could not get property {name} from {camera}: {e}")
+                settings[name] = None
+        return settings
+
+    def set_camera_property(camera, name, value):
+        """
+        Sets a specific camera property value.
+        """
+        if not hasattr(camera, 'videocapture') or camera.videocapture is None:
+            return False, None
+            
+        if name not in OPENCV_CAMERA_PROPERTIES:
+            return False, None
+            
+        cap = camera.videocapture
+        prop_id = OPENCV_CAMERA_PROPERTIES[name]
+        try:
+            # Map Auto Exposure value correctly
+            # On Linux V4L2: 1 = Manual Mode, 3 = Aperture Priority Mode (Auto)
+            if name == "auto_exposure":
+                if isinstance(value, bool):
+                    target_val = 3.0 if value else 1.0
+                else:
+                    target_val = float(value)
+            else:
+                target_val = float(value)
+                
+            success = cap.set(prop_id, target_val)
+            
+            # Read back actual value to verify
+            actual_val = cap.get(prop_id)
+            logger.info(f"Set property {name} for {camera} to {target_val}. Success: {success}, Actual: {actual_val}")
+            return success, float(actual_val) if actual_val is not None else None
+        except Exception as e:
+            logger.error(f"Error setting property {name} to {value} on {camera}: {e}")
+            return False, None
+
+    @app.route('/api/camera/<cam_name>/controls', methods=['GET'])
+    def get_controls(cam_name):
+        if cam_name not in cameras:
+            return {"error": f"Camera '{cam_name}' not found."}, 404
+        camera = cameras[cam_name]
+        settings = get_camera_properties(camera)
+        return {"camera": cam_name, "settings": settings}
+
+    @app.route('/api/camera/<cam_name>/controls', methods=['POST'])
+    def set_controls(cam_name):
+        from flask import request
+        if cam_name not in cameras:
+            return {"error": f"Camera '{cam_name}' not found."}, 404
+            
+        camera = cameras[cam_name]
+        data = request.json or {}
+        
+        results = {}
+        for name, value in data.items():
+            if name in OPENCV_CAMERA_PROPERTIES:
+                success, actual = set_camera_property(camera, name, value)
+                results[name] = {"success": success, "actual": actual}
+                
+        return {"camera": cam_name, "results": results}
+
     @app.route('/')
     def index():
         # High quality UI template for streaming dashboard
@@ -289,6 +377,35 @@ def main(cfg: StreamConfig):
                     border-radius: 20px;
                     border: 1px solid var(--border-color);
                 }
+
+                .settings-toggle-btn {
+                    background: rgba(255, 255, 255, 0.08);
+                    border: 1px solid var(--border-color);
+                    color: var(--text-primary);
+                    padding: 0.4rem 0.8rem;
+                    border-radius: 12px;
+                    cursor: pointer;
+                    font-family: inherit;
+                    font-size: 0.85rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 0.4rem;
+                    transition: all 0.3s ease;
+                }
+
+                .settings-toggle-btn:hover {
+                    background: rgba(0, 242, 254, 0.15);
+                    border-color: rgba(0, 242, 254, 0.4);
+                    color: #00f2fe;
+                }
+
+                .gear-icon {
+                    transition: transform 0.6s ease;
+                }
+
+                .settings-toggle-btn:hover .gear-icon {
+                    transform: rotate(90deg);
+                }
                 
                 .stream-container {
                     position: relative;
@@ -308,6 +425,163 @@ def main(cfg: StreamConfig):
                     width: 100%;
                     height: 100%;
                     object-fit: contain;
+                }
+
+                /* Control Panel styles */
+                .cam-controls {
+                    background: rgba(0, 0, 0, 0.25);
+                    border-top: 1px solid var(--border-color);
+                    padding: 1.5rem;
+                    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+                    max-height: 500px;
+                    opacity: 1;
+                    overflow: hidden;
+                }
+
+                .cam-controls.collapsed {
+                    max-height: 0;
+                    padding-top: 0;
+                    padding-bottom: 0;
+                    opacity: 0;
+                    border-top-color: transparent;
+                    pointer-events: none;
+                }
+
+                .control-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 1.2rem;
+                }
+
+                @media (max-width: 768px) {
+                    .control-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+
+                .control-item {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.4rem;
+                }
+
+                .toggle-item {
+                    flex-direction: row;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+
+                .control-header-row {
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 0.85rem;
+                }
+
+                .control-label {
+                    color: var(--text-primary);
+                    font-weight: 500;
+                }
+
+                .control-value {
+                    color: #00f2fe;
+                    font-weight: 600;
+                    font-family: monospace;
+                }
+
+                /* Slider styling */
+                input[type="range"] {
+                    -webkit-appearance: none;
+                    width: 100%;
+                    height: 6px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border-radius: 3px;
+                    outline: none;
+                    transition: background 0.3s;
+                }
+
+                input[type="range"]::-webkit-slider-runnable-track {
+                    width: 100%;
+                    height: 6px;
+                    cursor: pointer;
+                }
+
+                input[type="range"]::-webkit-slider-thumb {
+                    -webkit-appearance: none;
+                    appearance: none;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    background: #00f2fe;
+                    cursor: pointer;
+                    box-shadow: 0 0 10px rgba(0, 242, 254, 0.5);
+                    transition: transform 0.1s, background-color 0.2s;
+                    margin-top: -5px;
+                }
+
+                input[type="range"]::-webkit-slider-thumb:hover {
+                    transform: scale(1.2);
+                    background: #4facfe;
+                }
+
+                input[type="range"]:disabled {
+                    opacity: 0.3;
+                    cursor: not-allowed;
+                }
+
+                input[type="range"]:disabled::-webkit-slider-thumb {
+                    background: var(--text-secondary);
+                    box-shadow: none;
+                    cursor: not-allowed;
+                    transform: none;
+                }
+
+                /* Switch Toggle Styling */
+                .switch {
+                    position: relative;
+                    display: inline-block;
+                    width: 44px;
+                    height: 24px;
+                }
+
+                .switch input {
+                    opacity: 0;
+                    width: 0;
+                    height: 0;
+                }
+
+                .slider-round {
+                    position: absolute;
+                    cursor: pointer;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: rgba(255, 255, 255, 0.1);
+                    transition: .3s;
+                    border-radius: 24px;
+                    border: 1px solid var(--border-color);
+                }
+
+                .slider-round:before {
+                    position: absolute;
+                    content: "";
+                    height: 16px;
+                    width: 16px;
+                    left: 3px;
+                    bottom: 3px;
+                    background-color: var(--text-secondary);
+                    transition: .3s;
+                    border-radius: 50%;
+                }
+
+                input:checked + .slider-round {
+                    background: var(--accent-gradient);
+                }
+
+                input:checked + .slider-round:before {
+                    transform: translateX(20px);
+                    background-color: #ffffff;
+                    box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
                 }
                 
                 .cam-footer {
@@ -350,11 +624,80 @@ def main(cfg: StreamConfig):
                                 <span class="status-dot"></span>
                                 Camera: {{ cam_name }}
                             </div>
-                            <span class="cam-meta">{{ camera_types[cam_name] }}</span>
+                            <div style="display: flex; gap: 0.8rem; align-items: center;">
+                                <span class="cam-meta">{{ camera_types[cam_name] }}</span>
+                                <button class="settings-toggle-btn" onclick="toggleControls('{{ cam_name }}')">
+                                    <svg class="gear-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                    </svg>
+                                    Settings
+                                </button>
+                            </div>
                         </div>
                         <div class="stream-container">
                             <img class="stream-img" src="/video_feed/{{ cam_name }}" alt="{{ cam_name }} feed">
                         </div>
+
+                        <!-- Camera Control Panel -->
+                        <div id="controls-{{ cam_name }}" class="cam-controls collapsed">
+                            <div class="control-grid">
+                                <!-- Auto Exposure -->
+                                <div class="control-item toggle-item">
+                                    <span class="control-label">Auto Exposure</span>
+                                    <label class="switch">
+                                        <input type="checkbox" id="auto_exposure-{{ cam_name }}" onchange="updateControl('{{ cam_name }}', 'auto_exposure', this.checked)">
+                                        <span class="slider-round"></span>
+                                    </label>
+                                </div>
+                                
+                                <!-- Exposure Slider -->
+                                <div class="control-item">
+                                    <div class="control-header-row">
+                                        <span class="control-label">Exposure</span>
+                                        <span class="control-value" id="val-exposure-{{ cam_name }}">0</span>
+                                    </div>
+                                    <input type="range" id="exposure-{{ cam_name }}" min="1" max="10000" step="1" oninput="onSliderInput('{{ cam_name }}', 'exposure', this.value)" onchange="updateControl('{{ cam_name }}', 'exposure', this.value)">
+                                </div>
+                                
+                                <!-- Brightness Slider -->
+                                <div class="control-item">
+                                    <div class="control-header-row">
+                                        <span class="control-label">Brightness</span>
+                                        <span class="control-value" id="val-brightness-{{ cam_name }}">0</span>
+                                    </div>
+                                    <input type="range" id="brightness-{{ cam_name }}" min="0" max="255" step="1" oninput="onSliderInput('{{ cam_name }}', 'brightness', this.value)" onchange="updateControl('{{ cam_name }}', 'brightness', this.value)">
+                                </div>
+
+                                <!-- Contrast Slider -->
+                                <div class="control-item">
+                                    <div class="control-header-row">
+                                        <span class="control-label">Contrast</span>
+                                        <span class="control-value" id="val-contrast-{{ cam_name }}">0</span>
+                                    </div>
+                                    <input type="range" id="contrast-{{ cam_name }}" min="0" max="255" step="1" oninput="onSliderInput('{{ cam_name }}', 'contrast', this.value)" onchange="updateControl('{{ cam_name }}', 'contrast', this.value)">
+                                </div>
+
+                                <!-- Saturation Slider -->
+                                <div class="control-item">
+                                    <div class="control-header-row">
+                                        <span class="control-label">Saturation</span>
+                                        <span class="control-value" id="val-saturation-{{ cam_name }}">0</span>
+                                    </div>
+                                    <input type="range" id="saturation-{{ cam_name }}" min="0" max="255" step="1" oninput="onSliderInput('{{ cam_name }}', 'saturation', this.value)" onchange="updateControl('{{ cam_name }}', 'saturation', this.value)">
+                                </div>
+
+                                <!-- Gain Slider -->
+                                <div class="control-item">
+                                    <div class="control-header-row">
+                                        <span class="control-label">Gain</span>
+                                        <span class="control-value" id="val-gain-{{ cam_name }}">0</span>
+                                    </div>
+                                    <input type="range" id="gain-{{ cam_name }}" min="0" max="255" step="1" oninput="onSliderInput('{{ cam_name }}', 'gain', this.value)" onchange="updateControl('{{ cam_name }}', 'gain', this.value)">
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="cam-footer">
                             <span>Resolution: {{ cam.width }}x{{ cam.height }}</span>
                             <span>Target: {{ cam.fps }} FPS</span>
@@ -367,6 +710,135 @@ def main(cfg: StreamConfig):
             <footer>
                 LeKiwi Labs &copy; 2026. All rights reserved.
             </footer>
+
+            <script>
+                // State to track if camera controls are loaded
+                const camerasLoaded = {};
+                
+                // Debounce timers for each camera property API call
+                const debounceTimers = {};
+                
+                function debounce(key, func, delay) {
+                    if (debounceTimers[key]) {
+                        clearTimeout(debounceTimers[key]);
+                    }
+                    debounceTimers[key] = setTimeout(func, delay);
+                }
+
+                function toggleControls(camName) {
+                    const panel = document.getElementById(`controls-${camName}`);
+                    if (!panel) return;
+                    
+                    const isCollapsed = panel.classList.contains('collapsed');
+                    
+                    if (isCollapsed) {
+                        panel.classList.remove('collapsed');
+                        // Load current settings from the backend API
+                        loadCameraSettings(camName);
+                    } else {
+                        panel.classList.add('collapsed');
+                    }
+                }
+
+                async function loadCameraSettings(camName) {
+                    try {
+                        const response = await fetch(`/api/camera/${camName}/controls`);
+                        if (!response.ok) throw new Error("Failed to fetch camera controls");
+                        
+                        const data = await response.json();
+                        const settings = data.settings;
+                        
+                        // Bind values to UI elements
+                        for (const [key, val] of Object.entries(settings)) {
+                            if (val === null || val === undefined) continue;
+                            
+                            if (key === 'auto_exposure') {
+                                // V4L2 auto exposure: 3 is auto, 1 is manual.
+                                const isAuto = (val === 3.0);
+                                const checkbox = document.getElementById(`auto_exposure-${camName}`);
+                                if (checkbox) {
+                                    checkbox.checked = isAuto;
+                                    // Disable exposure slider if auto exposure is on
+                                    const expSlider = document.getElementById(`exposure-${camName}`);
+                                    if (expSlider) expSlider.disabled = isAuto;
+                                }
+                            } else {
+                                const slider = document.getElementById(`${key}-${camName}`);
+                                const valDisplay = document.getElementById(`val-${key}-${camName}`);
+                                if (slider) {
+                                    slider.value = val;
+                                }
+                                if (valDisplay) {
+                                    valDisplay.textContent = Math.round(val);
+                                }
+                            }
+                        }
+                        camerasLoaded[camName] = true;
+                    } catch (error) {
+                        console.error(`Error loading settings for camera ${camName}:`, error);
+                    }
+                }
+
+                // Realtime feedback for slider movement before API is sent
+                function onSliderInput(camName, propName, value) {
+                    const valDisplay = document.getElementById(`val-${propName}-${camName}`);
+                    if (valDisplay) {
+                        valDisplay.textContent = value;
+                    }
+                    
+                    // Debounce API update
+                    debounce(`${camName}-${propName}`, () => {
+                        sendControlUpdate(camName, propName, value);
+                    }, 150);
+                }
+
+                async function updateControl(camName, propName, value) {
+                    // This handles checkboxes (auto_exposure) which trigger change events immediately
+                    if (propName === 'auto_exposure') {
+                        const expSlider = document.getElementById(`exposure-${camName}`);
+                        if (expSlider) {
+                            expSlider.disabled = value; // value is checked state (boolean)
+                        }
+                        await sendControlUpdate(camName, propName, value);
+                        
+                        // Refresh settings after auto_exposure toggle because exposure value might be modified by driver
+                        setTimeout(() => loadCameraSettings(camName), 200);
+                    }
+                }
+
+                async function sendControlUpdate(camName, propName, value) {
+                    try {
+                        const payload = {};
+                        payload[propName] = value;
+                        
+                        const response = await fetch(`/api/camera/${camName}/controls`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(payload)
+                        });
+                        
+                        if (!response.ok) throw new Error("Failed to update control");
+                        
+                        const data = await response.json();
+                        const result = data.results[propName];
+                        
+                        // Synchronize if backend returns the actual value
+                        if (result && result.success && result.actual !== null) {
+                            const valDisplay = document.getElementById(`val-${propName}-${camName}`);
+                            const slider = document.getElementById(`${propName}-${camName}`);
+                            
+                            if (propName !== 'auto_exposure') {
+                                if (valDisplay) valDisplay.textContent = Math.round(result.actual);
+                                if (slider) slider.value = result.actual;
+                            }
+                        }
+                    } catch (error) {
+                        console.error(`Error updating control ${propName} for ${camName}:`, error);
+                    }
+                }
+            </script>
         </body>
         </html>
         """
@@ -390,3 +862,4 @@ def main(cfg: StreamConfig):
 
 if __name__ == "__main__":
     main()
+

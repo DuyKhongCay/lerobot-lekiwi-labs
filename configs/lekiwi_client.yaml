@@ -1,18 +1,10 @@
-# LeKiwi teleoperation config for `lerobot-teleoperate`: SO101 leader arm drives the
-# arm, the auto-attached keyboard drives the base. No recording; Ctrl+C to stop
-# (or set teleop_time_s for a fixed duration).
-#
-# Run the following command from the workspace root:
-#   lerobot-teleoperate \
-#       --config_path lekiwi_labs/scripts/lekiwi_teleop.yaml \
-#       --robot.discover_packages_path=lekiwi_labs.cameras
-
-robot: 
-  type: lekiwi_client
-  remote_ip: 192.168.1.6  # Robot IP address (change as needed, e.g., 172.18.134.136)
-  id: DuyKhongCay
-  polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
-  cameras: !include lekiwi_cameras.yaml
-
-fps: 30
-display_data: true
+# Shared LeKiwi robot connection config -- single source of truth, pulled into every
+# lekiwi_*.yaml via `robot: !include lekiwi_robot.yaml` (path resolved relative to the
+# including file). Edit remote_ip here once when your network changes.
+type: lekiwi_client            # laptop-side client; the host runs on the robot itself
+remote_ip: 192.168.1.6       # LeKiwi host IP -- changes with your network
+id: DuyKhongCay
+polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
+# Pin all 3 cameras explicitly (upstream's default dropped to 2); the client only uses
+# width/height for dataset feature shapes -- the host does the actual capture + rotation.
+cameras: !include lekiwi_cameras.yaml

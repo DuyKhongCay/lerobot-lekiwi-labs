@@ -1,31 +1,65 @@
-Để đảm bảo độ ổn định cao nhất cho hệ thống và cài đặt thành công vào môi trường ảo (virtual environment), bạn hãy thực hiện theo quy trình chuẩn hóa sau đây:
+# LeKiwi Cameras Packages
 
-### Bước 1: Cài đặt các gói phụ thuộc (Dependencies)
+## 1. Overview
+This directory contains custom camera drivers and wrappers developed for the LeKiwi project, integrating seamlessly with the LeRobot framework. It provides specific implementations for handling grayscale USB cameras via OpenCV, as well as high-performance, synchronized CSI cameras (such as the IMX219 module) for the Raspberry Pi 5 using Picamera2.
 
-Trước khi build, hệ thống cần các công cụ biên dịch cốt lõi. Hãy mở terminal và chạy:
+## 2. Grayscale OpenCV Camera
+This module provides the `GrayscaleOpenCVCam` class (registered as `grayscaleopencv`), which extends LeRobot's base `OpenCVCamera`. 
+
+**Key Features:**
+- **Monochrome Support:** Specifically designed for grayscale cameras. It automatically converts single-channel raw frames into the 3-channel RGB/BGR formats required by the LeRobot vision pipeline.
+- **Hardware Control:** Automatically configures internal hardware settings upon connection, such as disabling auto-exposure and applying predefined manual exposure and gain values, ensuring consistent lighting during data collection.
+
+## 3. IMX219 CSI Camera
+These modules provide native support for the Sony IMX219 sensor connected directly to the Raspberry Pi 5's CSI ports, leveraging the advanced `Picamera2` library for low-latency, high-performance capture.
+
+**Single Camera Features (`imx219single`):**
+- Independent frame capture with highly configurable settings (resolution, framerate, RGB/BGR color mode, and image rotation).
+- Implements a settable hardware warm-up period to allow the sensor's auto-exposure algorithms to stabilize before the teleoperation or recording loop begins.
+
+**Stereo Camera Features (`imx219stereo`):**
+- **Dual Camera Wrapping:** Manages two IMX219 cameras simultaneously acting as a synchronized pair using a Server-Client architecture.
+- **Software Synchronization:** Accurately matches captured frame pairs by comparing their `SensorTimestamp` metadata (at nanosecond precision). A stereo image is only outputted when both frames fall within a strict, configurable synchronization threshold (e.g., 15ms).
+- **Auto Concatenation:** Automatically stitches the synchronized stereo pair into a single numpy array, supporting both horizontal and vertical concatenation modes.
+- **IMU Integration:** Built-in support for reading spatial data (Accelerometer, Gyroscope, Magnetometer) if the stereo camera module is equipped with an on-board ICM20948 sensor.
+
+If you are planning to use the IMX219 CSI camera packages (`imx219_single_cam.py` or `imx219_stereo_cam.py`) on a Raspberry Pi 5 within a Python virtual environment, you must install the `libcamera` library and its Python bindings properly to avoid system crashes and conflicts. Installation guide down below.
+
+## 4. CSI Camera Library Virtual Environment Installation Guide
+> [!WARNING]
+> This guide has currently only been tested on **Raspberry Pi 5**. If you are using a different hardware platform or an older Raspberry Pi model, please proceed with caution.
+
+To ensure maximum system stability and successfully install into a virtual environment, please follow this standardized procedure:
+
+### Step 1: Install Dependencies
+
+Before building, the system requires core compilation tools. Open a terminal and run:
 
 ```bash
 sudo apt update
 sudo apt install -y g++ meson ninja-build pkg-config libyaml-dev python3-yaml python3-ply python3-jinja2 libgnutls28-dev openssl libudev-dev libgtest-dev
 ```
 
-### Bước 2: Clone mã nguồn từ nhánh của Raspberry Pi
+### Step 2: Initialize the libcamera Submodule
 
-Vì bạn dùng phần cứng Pi, bạn bắt buộc phải dùng bản fork của Raspberry Pi thay vì bản gốc của libcamera để có đầy đủ driver (như `rpi/pisp` cho Pi 5).
+Since you are using Raspberry Pi hardware, you must use the Raspberry Pi fork instead of the original libcamera to get the full drivers (such as `rpi/pisp` for Pi 5). This repository is already included in the project as a git submodule.
+
+Run the following commands from the root of the workspace to sync and enter the directory:
 
 ```bash
-git clone https://github.com/raspberrypi/libcamera.git
-cd libcamera
+git submodule sync lekiwi_labs/dependencies/libcamera
+git submodule update --init --recursive lekiwi_labs/dependencies/libcamera
+cd lekiwi_labs/dependencies/libcamera
 ```
 
-### Bước 3: Cấu hình build với Meson (Tối ưu hóa)
+### Step 3: Configure the build with Meson (Optimization)
 
-Đây là bước quan trọng để hệ thống không phải biên dịch những module thừa. Giả sử bạn đang dùng Pi 5 (pipeline là `rpi/pisp`), hãy kích hoạt môi trường ảo (virtual environment) của bạn trước, sau đó chạy lệnh cấu hình:
+This is a crucial step so the system doesn't compile unnecessary modules. Assuming you are using a Pi 5 (pipeline is `rpi/pisp`), activate your virtual environment first, then run the configuration command:
 
 ```bash
-# Kích hoạt môi trường ảo của bạn trước, ví dụ:
+# Activate your virtual environment first, for example:
 # source ~/my_env/bin/activate 
-# hoặc conda activate my_env
+# or conda activate my_env
 
 meson setup build \
     -Dpipelines=rpi/pisp \
@@ -36,37 +70,37 @@ meson setup build \
     -Dpython=enabled
 ```
 
-**Kiểm tra log:** Hãy nhìn vào dòng output cấu hình Python. Nếu nó hiện **`YES`** và trỏ đúng vào đường dẫn Python trong môi trường ảo của bạn thì bạn đã cấu hình đúng.
+**Check the log:** Look at the Python configuration output line. If it shows **`YES`** and points correctly to the Python path in your virtual environment, then you have configured it correctly.
 
-### Bước 4: Biên dịch an toàn (Tránh OOM)
+### Step 4: Safe Compilation (Avoid OOM)
 
-Tài liệu `pi5-camera-ubuntu` và hướng dẫn cài đặt đều cảnh báo quá trình này ngốn rất nhiều RAM. Nếu bạn chạy lệnh `ninja -C build` thông thường, nó sẽ dùng tối đa số luồng CPU và làm đứng máy ngay lập tức (đặc biệt trên các bo mạch Pi bản 4GB RAM).
-Giải pháp ổn định nhất là **giới hạn số luồng biên dịch xuống 2**:
+The `pi5-camera-ubuntu` documentation and installation guides both warn that this process consumes a lot of RAM. If you run the standard `ninja -C build` command, it will use the maximum number of CPU threads and crash/freeze the machine immediately (especially on 4GB RAM Pi boards).
+The most stable solution is to **limit the number of compilation threads to 2**:
 
 ```bash
 ninja -C build -j 2
 ```
 
-*Lưu ý: Quá trình này sẽ tốn thời gian hơn bình thường (khoảng 10 - 15 phút), nhưng nó đảm bảo Pi của bạn không bị treo.*
+*Note: This process will take longer than usual (about 10 - 15 minutes), but it ensures your Pi will not freeze.*
 
-### Bước 5: Tích hợp an toàn vào môi trường ảo
+### Step 5: Safe integration into the virtual environment
 
-Sau khi quá trình biên dịch hoàn tất (chạy xong 100%), **tuyệt đối KHÔNG chạy lệnh `sudo ninja install`**. Lệnh này sẽ đẩy thư viện ra cấp độ hệ điều hành (system-wide) và có thể gây xung đột, làm mất tác dụng của môi trường ảo.
+After the compilation is complete (reaches 100%), **absolutely DO NOT run the `sudo ninja install` command**. This command will push the library to the system-wide OS level and may cause conflicts, rendering your virtual environment ineffective.
 
-Thay vào đó, hãy lấy trực tiếp file binding vừa được tạo ra:
+Instead, grab the generated binding files directly:
 
-1. Truy cập vào thư mục chứa file Python binding vừa build:
+1. Navigate to the directory containing the newly built Python binding file:
 ```bash
 cd build/src/py/libcamera
 ```
 
-2. Tìm file có định dạng `.so` (ví dụ: `_libcamera.cpython-312-aarch64-linux-gnu.so`).
-3. Copy toàn bộ thư mục `libcamera` (hoặc file `.so` này cùng các file `__init__.py`) và dán thẳng vào thư mục `site-packages` bên trong môi trường ảo của bạn.
+2. Look for the file with a `.so` extension (e.g., `_libcamera.cpython-312-aarch64-linux-gnu.so`).
+3. Copy the entire `libcamera` directory (or this `.so` file along with the `__init__.py` files) and paste it directly into the `site-packages` directory inside your virtual environment.
 
-**Ví dụ lệnh copy:**
+**Example copy command:**
 
 ```bash
-cp -r build/src/py/libcamera /đường/dẫn/đến/môi_trường_ảo_của_bạn/lib/python3.x/site-packages/
+cp -r build/src/py/libcamera /path/to/your/virtual_environment/lib/python3.x/site-packages/
 ```
 
-Đây là quy trình an toàn, cách ly và ổn định nhất, giúp bạn có được thư viện `libcamera` (kèm Python binding) khớp 100% với phiên bản Python trong môi trường ảo, đồng thời tránh được rủi ro treo phần cứng lúc biên dịch.
+This is the safest, most isolated, and most stable procedure, ensuring you get the `libcamera` library (along with Python bindings) that matches 100% with the Python version in your virtual environment, while avoiding the risk of hardware freezes during compilation.

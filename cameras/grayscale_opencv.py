@@ -37,7 +37,7 @@ from lerobot.utils.errors import DeviceNotConnectedError
 logger = logging.getLogger(__name__)
 
 
-@CameraConfig.register_subclass("grayscale_opencv")
+@CameraConfig.register_subclass("grayscaleopencv")
 @dataclass
 class GrayscaleOpenCVCamConfig(OpenCVCameraConfig):
     """Configuration class for grayscale-based OpenCV camera devices.
@@ -76,12 +76,12 @@ class GrayscaleOpenCVCam(OpenCVCamera):
             logger.warning(f"{self} failed to set auto exposure to manual (1).")
 
         # Apply exposure: 650 (on a scale of 10000)
-        success_exposure = self.videocapture.set(cv2.CAP_PROP_EXPOSURE, 650.0)
+        success_exposure = self.videocapture.set(cv2.CAP_PROP_EXPOSURE, 400.0)
         if not success_exposure:
             logger.warning(f"{self} failed to set exposure to 650.")
 
         # Apply gain: 30
-        success_gain = self.videocapture.set(cv2.CAP_PROP_GAIN, 30.0)
+        success_gain = self.videocapture.set(cv2.CAP_PROP_GAIN, 20)
         if not success_gain:
             logger.warning(f"{self} failed to set gain to 30.")
 

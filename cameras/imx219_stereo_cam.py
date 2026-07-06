@@ -46,37 +46,23 @@ from lerobot.cameras.camera import Camera
 from lerobot.cameras.configs import CameraConfig, ColorMode, Cv2Rotation
 from lerobot.utils.errors import DeviceNotConnectedError
 
+from .imx219_single_cam import (
+    _FORMAT_MAP,
+    _IMX219_MODES,
+    _NS_PER_MS,
+    IMX219SingleCamera,
+    IMX219SingleCameraConfig,
+)
+
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Picamera2 pixel format strings that correspond to OpenCV/numpy channel order
-_FORMAT_MAP: dict[str, str] = {
-    ColorMode.RGB: "RGB888",
-    ColorMode.BGR: "BGR888",
-}
-
-# Nano-seconds per millisecond (SensorTimestamp is in nanoseconds)
-_NS_PER_MS = 1_000_000
-
-# Default sensor modes available on IMX219 (Width x Height @ max FPS)
-_IMX219_MODES: list[dict[str, Any]] = [
-    {"width": 640,  "height": 480,  "fps": 200},
-    {"width": 1640, "height": 1232, "fps": 81},
-    {"width": 1920, "height": 1080, "fps": 47},
-    {"width": 3280, "height": 2464, "fps": 21},
-]
-
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
 
-@CameraConfig.register_subclass("imx219_stereo")
+@CameraConfig.register_subclass("imx219stereo")
 @dataclass
-class IMX219StereoCameraConfig(CameraConfig):
+class IMX219StereoCameraConfig(IMX219SingleCameraConfig):
     """Configuration for the IMX219 Stereo Camera module on Raspberry Pi 5.
 
     Both cameras share the same resolution / FPS settings. One camera acts as
@@ -90,16 +76,20 @@ class IMX219StereoCameraConfig(CameraConfig):
             maximum for the chosen resolution so the client can "catch up").
             Defaults to 30.
         width: Width of a *single* camera's output in pixels. Defaults to 640.
+            Inherited from IMX219SingleCameraConfig.
         height: Height of a *single* camera's output in pixels. Defaults to 480.
+            Inherited from IMX219SingleCameraConfig.
         server_idx: Index of the camera that will act as the sync server (usually
             camera 0 on the Pi 5 CSI connector). Defaults to 0.
         client_idx: Index of the camera that will act as the sync client.
             Defaults to 1.
-        color_mode: Output colour ordering (RGB or BGR). Defaults to RGB.
+        color_mode: Output colour ordering (RGB or BGR). Defaults to BGR for stereo.
         rotation: Image rotation applied after capture. Defaults to NO_ROTATION.
+            Inherited from IMX219SingleCameraConfig.
         warmup_s: Seconds to wait after starting both cameras before returning
             from ``connect()``. This allows auto-exposure to settle.
             Defaults to 2.
+            Inherited from IMX219SingleCameraConfig.
         sync_threshold_ms: Maximum allowed timestamp difference (ms) between a
             server frame and a client frame for them to be considered a matched
             stereo pair. Defaults to 15.0.
@@ -113,6 +103,7 @@ class IMX219StereoCameraConfig(CameraConfig):
         buffer_count: Number of frame buffers allocated per camera. Increase to
             reduce dropped frames under heavy load; minimum is 4 for sync.
             Defaults to 4.
+            Inherited from IMX219SingleCameraConfig.
         enable_imu: Whether to enable IMU (ICM20948) reading via RTIMULib.
             Defaults to False.
         imu_i2c_bus: I2C bus number for the ICM20948. Defaults to 1.
@@ -122,15 +113,9 @@ class IMX219StereoCameraConfig(CameraConfig):
     server_idx: int = 0
     client_idx: int = 1
 
-    # Image settings (applied to both cameras)
-    color_mode: ColorMode = ColorMode.BGR
-    rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
-
     # Sync & capture tuning
-    warmup_s: int = 2
     sync_threshold_ms: float = 15.0
     concat_mode: str = "horizontal"  # "horizontal" | "vertical"
-    buffer_count: int = 4
 
     # IMU support
     enable_imu: bool = False
@@ -138,31 +123,24 @@ class IMX219StereoCameraConfig(CameraConfig):
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
-        self.color_mode = ColorMode(self.color_mode)
-        self.rotation = Cv2Rotation(self.rotation)
+        super().__post_init__()
 
         if self.concat_mode not in ("horizontal", "vertical"):
             raise ValueError(
                 f"`concat_mode` must be 'horizontal' or 'vertical', "
                 f"but '{self.concat_mode}' was provided."
             )
-        if self.buffer_count < 4:
-            raise ValueError(
-                "`buffer_count` must be at least 4 for software synchronisation."
-            )
         if self.server_idx == self.client_idx:
             raise ValueError(
                 "`server_idx` and `client_idx` must be different camera indices."
             )
-        if self.fps is not None and self.fps <= 0:
-            raise ValueError("`fps` must be a positive integer.")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Camera Implementation
 # ──────────────────────────────────────────────────────────────────────────────
 
-class IMX219StereoCamera(Camera):
+class IMX219StereoCamera(IMX219SingleCamera):
     """Stereo camera wrapper for two Sony IMX219 sensors on Raspberry Pi 5.
 
     Uses the Picamera2 library with libcamera's software synchronisation
@@ -203,7 +181,7 @@ class IMX219StereoCamera(Camera):
             config: Configuration object for this stereo camera pair.
         """
         super().__init__(config)
-        self.config = config
+        self.config: IMX219StereoCameraConfig = config  # type: ignore[assignment]
 
         # Effective output dimensions (set during connect)
         self.fps: int | None = config.fps
@@ -243,42 +221,6 @@ class IMX219StereoCamera(Camera):
         """True if both cameras are open and running."""
         return self._server_started and self._client_started
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Camera Interface – Static Utilities
-    # ──────────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def find_cameras() -> list[dict[str, Any]]:
-        """Enumerate all cameras visible to libcamera / Picamera2.
-
-        Returns:
-            List of dicts, one per camera, with keys:
-            ``index``, ``model``, ``location``, ``rotation``, ``id``.
-        """
-        try:
-            from picamera2 import Picamera2  # type: ignore
-        except ImportError as e:
-            logger.warning(f"Picamera2 is not installed – cannot enumerate cameras. ({e})")
-            return []
-
-        try:
-            raw_info = Picamera2.global_camera_info()
-            cameras = []
-            for item in raw_info:
-                cameras.append(
-                    {
-                        "index": item.get("Num", -1),
-                        "model": item.get("Model", "unknown"),
-                        "location": item.get("Location", "unknown"),
-                        "rotation": item.get("Rotation", 0),
-                        "id": item.get("Id", ""),
-                    }
-                )
-            return cameras
-        except Exception as e:
-            # Log the real error so it's not hidden behind a misleading "not installed" message
-            logger.warning(f"Picamera2 is installed but failed to enumerate cameras: {e}")
-            return []
 
     # ──────────────────────────────────────────────────────────────────────────
     # Camera Interface – connect / disconnect
@@ -707,26 +649,6 @@ class IMX219StereoCamera(Camera):
         else:  # "vertical"
             return np.concatenate([server_frame, client_frame], axis=0)
 
-    def _apply_rotation(self, frame: NDArray[Any]) -> NDArray[Any]:
-        """Rotate a frame according to the configured rotation setting.
-
-        Uses numpy operations to avoid an OpenCV import dependency in this
-        module (OpenCV is not guaranteed to be installed on every Pi).
-
-        Args:
-            frame: Input image array.
-
-        Returns:
-            Rotated image array (or the original if NO_ROTATION).
-        """
-        rot = self.config.rotation
-        if rot == Cv2Rotation.ROTATE_90:
-            return np.rot90(frame, k=1)
-        elif rot == Cv2Rotation.ROTATE_180:
-            return np.rot90(frame, k=2)
-        elif rot == Cv2Rotation.ROTATE_270:
-            return np.rot90(frame, k=3)
-        return frame  # NO_ROTATION
 
     def _release_cameras(self) -> None:
         """Stop and close both Picamera2 instances, clearing all state."""
