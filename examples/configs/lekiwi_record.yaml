@@ -6,7 +6,7 @@
 robot: !include lekiwi_client.yaml
 
 # Leader arm configuration
-teleop_arm: !include lekiwi_leader.yaml
+teleop_arm: !include uarm_leader_config.yaml
 
 # Keyboard base teleoperator config
 teleop_base:

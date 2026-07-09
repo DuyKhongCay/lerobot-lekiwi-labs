@@ -3,14 +3,17 @@
 ## 1. Overview
 This directory contains custom camera drivers and wrappers developed for the LeKiwi project, integrating seamlessly with the LeRobot framework. It provides specific implementations for handling grayscale USB cameras via OpenCV, as well as high-performance, synchronized CSI cameras (such as the IMX219 module) for the Raspberry Pi 5 using Picamera2.
 
-## 2. Grayscale OpenCV Camera
+## 2. Custom OpenCV Camera
+These modules feature an automatic downsampling mechanism for high-resolution video streams. This approach is necessary because the camera hardware automatically crops the image sensor at lower resolutions, which reduces the Field of View (FOV). To capture the widest possible FOV, the hardware must be configured to run at a higher resolution. The frames are then downsampled in software to 640x480 to optimize performance and reduce bandwidth while maintaining compatibility with the LeRobot pipeline. This feature is implemented in both `grayscale_opencv.py` and `imx219_single_cam.py`.
+
+## 3. Grayscale OpenCV Camera
 This module provides the `GrayscaleOpenCVCam` class (registered as `grayscaleopencv`), which extends LeRobot's base `OpenCVCamera`. 
 
 **Key Features:**
 - **Monochrome Support:** Specifically designed for grayscale cameras. It automatically converts single-channel raw frames into the 3-channel RGB/BGR formats required by the LeRobot vision pipeline.
 - **Hardware Control:** Automatically configures internal hardware settings upon connection, such as disabling auto-exposure and applying predefined manual exposure and gain values, ensuring consistent lighting during data collection.
 
-## 3. IMX219 CSI Camera
+## 4. IMX219 CSI Camera
 These modules provide native support for the Sony IMX219 sensor connected directly to the Raspberry Pi 5's CSI ports, leveraging the advanced `Picamera2` library for low-latency, high-performance capture.
 
 **Single Camera Features (`imx219single`):**
@@ -25,7 +28,7 @@ These modules provide native support for the Sony IMX219 sensor connected direct
 
 If you are planning to use the IMX219 CSI camera packages (`imx219_single_cam.py` or `imx219_stereo_cam.py`) on a Raspberry Pi 5 within a Python virtual environment, you must install the `libcamera` library and its Python bindings properly to avoid system crashes and conflicts. Installation guide down below.
 
-## 4. CSI Camera Library Virtual Environment Installation Guide
+## 5. CSI Camera Library Virtual Environment Installation Guide
 > [!WARNING]
 > This guide has currently only been tested on **Raspberry Pi 5**. If you are using a different hardware platform or an older Raspberry Pi model, please proceed with caution.
 

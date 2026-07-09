@@ -13,6 +13,12 @@ dependencies = [
     "picamera2; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l'",
 ]
 
+[project.optional-dependencies]
+imu = [
+    "icm20948",
+    "smbus2",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cameras*", "motors*", "teleoperates*"]

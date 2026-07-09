@@ -104,7 +104,7 @@ class IMX219StereoCameraConfig(IMX219SingleCameraConfig):
             reduce dropped frames under heavy load; minimum is 4 for sync.
             Defaults to 4.
             Inherited from IMX219SingleCameraConfig.
-        enable_imu: Whether to enable IMU (ICM20948) reading via RTIMULib.
+        enable_imu: Whether to enable IMU (ICM20948) reading via the icm20948 library.
             Defaults to False.
         imu_i2c_bus: I2C bus number for the ICM20948. Defaults to 1.
     """
@@ -270,8 +270,8 @@ class IMX219StereoCamera(IMX219SingleCamera):
         # Create Picamera2 instances
         # ------------------------------------------------------------------
         try:
-            self._picam_server = Picamera2(self.config.server_idx)
-            self._picam_client = Picamera2(self.config.client_idx)
+            self._picam_server = Picamera2(self.config.server_idx, tuning=self.config.tuning_file)
+            self._picam_client = Picamera2(self.config.client_idx, tuning=self.config.tuning_file)
         except Exception as e:
             raise ConnectionError(f"{self} failed to open cameras: {e}") from e
 
@@ -344,7 +344,11 @@ class IMX219StereoCamera(IMX219SingleCamera):
         # Optional IMU initialisation
         # ------------------------------------------------------------------
         if self.config.enable_imu:
-            self._init_imu()
+            try:
+                self._init_imu()
+            except Exception as e:
+                self._release_cameras()
+                raise e
 
         # ------------------------------------------------------------------
         # Warm-up: wait for the first valid synchronised stereo frame
@@ -487,7 +491,7 @@ class IMX219StereoCamera(IMX219SingleCamera):
     # ──────────────────────────────────────────────────────────────────────────
 
     def read_imu(self) -> dict[str, Any] | None:
-        """Read the latest IMU sample from the ICM20948.
+        """Read the latest IMU sample from the ICM20948 using the icm20948 library.
 
         The IMU must be enabled via ``enable_imu=True`` in the configuration
         and the camera must be connected.
@@ -498,6 +502,8 @@ class IMX219StereoCamera(IMX219SingleCamera):
             - ``"gyro"``:  (gx, gy, gz) in degrees / second.
             - ``"compass"``: (mx, my, mz) in micro-Tesla.
             - ``"timestamp"``: time.perf_counter() reading at sample time.
+            - ``"fusion_pose"``: Always None (sensor fusion not supported).
+            - ``"fusion_qPose"``: Always None.
             Returns ``None`` if the IMU is not enabled or not ready.
 
         Raises:
@@ -510,16 +516,16 @@ class IMX219StereoCamera(IMX219SingleCamera):
             return None
 
         try:
-            if self._imu.IMURead():
-                data = self._imu.getIMUData()
-                return {
-                    "accel": data.get("accel", (0.0, 0.0, 0.0)),
-                    "gyro": data.get("gyro", (0.0, 0.0, 0.0)),
-                    "compass": data.get("compass", (0.0, 0.0, 0.0)),
-                    "timestamp": time.perf_counter(),
-                    "fusion_pose": data.get("fusionPose", None),
-                    "fusion_qPose": data.get("fusionQPose", None),
-                }
+            ax, ay, az, gx, gy, gz = self._imu.read_accelerometer_gyro_data()
+            mx, my, mz = self._imu.read_magnetometer_data()
+            return {
+                "accel": (ax, ay, az),
+                "gyro": (gx, gy, gz),
+                "compass": (mx, my, mz),
+                "timestamp": time.perf_counter(),
+                "fusion_pose": None,
+                "fusion_qPose": None,
+            }
         except Exception as e:
             logger.warning(f"{self} IMU read error: {e}")
         return None
@@ -678,48 +684,45 @@ class IMX219StereoCamera(IMX219SingleCamera):
             self._new_frame_event.clear()
 
     def _init_imu(self) -> None:
-        """Initialise the ICM20948 IMU via RTIMULib.
+        """Initialise the ICM20948 IMU via the icm20948 Python library.
 
-        RTIMULib auto-detects the IMU chip on the specified I2C bus. If
-        initialisation fails a warning is logged and IMU support is disabled
-        (does not raise an exception so that camera operation continues).
+        Raises:
+            ImportError: If the icm20948 or smbus2 library is not installed.
+            RuntimeError: If the IMU fails to initialise on the I2C bus.
         """
         try:
-            import RTIMU  # type: ignore  # installed via: sudo apt install python3-rtimu
+            from icm20948 import ICM20948  # type: ignore
+            import smbus2
+        except ImportError as e:
+            raise ImportError(
+                f"The 'icm20948' and 'smbus2' libraries are required when `enable_imu` is True. "
+                "Please install them using: pip install -e .[imu]"
+            ) from e
 
-            settings = RTIMU.Settings("RTIMULib")
-            settings.I2CBus = self.config.imu_i2c_bus
-            imu = RTIMU.RTIMU(settings)
-
-            if not imu.IMUInit():
-                logger.warning(
-                    f"{self} RTIMULib could not initialise the IMU on "
-                    f"I2C bus {self.config.imu_i2c_bus}.  "
-                    "IMU data will not be available."
-                )
-                return
-
-            imu.setSlerpPower(0.02)
-            imu.setGyroEnable(True)
-            imu.setAccelEnable(True)
-            imu.setCompassEnable(True)
+        try:
+            # Try to initialize with the specified I2C bus and address.
+            # Default Pimoroni address is 0x68 (sometimes 0x69).
+            # The icm20948 library requires an SMBus object instance, not an integer bus ID.
+            bus = smbus2.SMBus(self.config.imu_i2c_bus)
+            try:
+                imu = ICM20948(i2c_addr=0x68, i2c_bus=bus)
+                _ = imu.read_accelerometer_gyro_data()  # Dummy read to verify
+            except Exception:
+                logger.info("Failed to init ICM20948 at 0x68, trying 0x69...")
+                bus = smbus2.SMBus(self.config.imu_i2c_bus)
+                imu = ICM20948(i2c_addr=0x69, i2c_bus=bus)
+                _ = imu.read_accelerometer_gyro_data()
 
             self._imu = imu
-            self._imu_poll_interval_s = imu.IMUGetPollInterval() / 1000.0
+            # Set a nominal poll interval of 5ms (200Hz) as icm20948 doesn't expose it
+            self._imu_poll_interval_s = 0.005
 
             logger.info(
-                f"{self} IMU initialised: {imu.IMUName()} on "
-                f"I2C bus {self.config.imu_i2c_bus}.  "
-                f"Poll interval: {self._imu_poll_interval_s * 1000:.1f} ms."
+                f"{self} IMU initialised: ICM20948 on I2C bus {self.config.imu_i2c_bus}."
             )
 
-        except ImportError:
-            logger.warning(
-                f"{self} RTIMULib is not installed – IMU support disabled.  "
-                "Install with: sudo apt install python3-rtimu"
-            )
         except Exception as e:
-            logger.warning(f"{self} unexpected error during IMU init: {e}")
+            raise RuntimeError(f"Unexpected error during IMU init: {e}") from e
 
     # ──────────────────────────────────────────────────────────────────────────
     # String representation
