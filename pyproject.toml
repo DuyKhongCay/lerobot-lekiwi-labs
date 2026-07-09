@@ -19,6 +19,24 @@ imu = [
     "smbus2",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cameras*", "motors*", "teleoperates*"]
+[tool.setuptools]
+packages = [
+    "lekiwi_labs.cameras",
+    "lekiwi_labs.motors",
+    "lekiwi_labs.motors.zhongli",
+    "lekiwi_labs.teleoperates",
+    "lekiwi_labs.teleoperates.gamepad",
+    "lekiwi_labs.teleoperates.keyboard",
+    "lekiwi_labs.teleoperates.uarm_leader_config1",
+    "lekiwi_labs.scripts",
+]
+
+[tool.setuptools.package-dir]
+"lekiwi_labs.cameras" = "cameras"
+"lekiwi_labs.motors" = "motors"
+"lekiwi_labs.motors.zhongli" = "motors/zhongli"
+"lekiwi_labs.teleoperates" = "teleoperates"
+"lekiwi_labs.teleoperates.gamepad" = "teleoperates/gamepad"
+"lekiwi_labs.teleoperates.keyboard" = "teleoperates/keyboard"
+"lekiwi_labs.teleoperates.uarm_leader_config1" = "teleoperates/uarm_leader_config1"
+"lekiwi_labs.scripts" = "scripts"
