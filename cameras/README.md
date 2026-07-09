@@ -112,7 +112,7 @@ meson setup build \
     -Dqcam=disabled \
     -Dtest=false \
     -Ddocumentation=disabled \
-    -Dpython=enabled
+    -Dpycamera=enabled
 ```
 
 **Check the log:** Look at the Python configuration output line. If it shows **`YES`** and points correctly to the Python path in your virtual environment, then you have configured it correctly.
