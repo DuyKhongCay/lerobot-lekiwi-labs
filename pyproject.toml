@@ -29,6 +29,10 @@ packages = [
     "lekiwi_labs.teleoperates.keyboard",
     "lekiwi_labs.teleoperates.uarm_leader_config1",
     "lekiwi_labs.scripts",
+    "lekiwi_labs.examples",
+    "lekiwi_labs.examples.cameras",
+    "lekiwi_labs.examples.motors",
+    "lekiwi_labs.examples.configs",
 ]
 
 [tool.setuptools.package-dir]
@@ -40,3 +44,7 @@ packages = [
 "lekiwi_labs.teleoperates.keyboard" = "teleoperates/keyboard"
 "lekiwi_labs.teleoperates.uarm_leader_config1" = "teleoperates/uarm_leader_config1"
 "lekiwi_labs.scripts" = "scripts"
+"lekiwi_labs.examples" = "examples"
+"lekiwi_labs.examples.cameras" = "examples/cameras"
+"lekiwi_labs.examples.motors" = "examples/motors"
+"lekiwi_labs.examples.configs" = "examples/configs"

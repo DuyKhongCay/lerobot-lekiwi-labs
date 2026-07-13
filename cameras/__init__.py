@@ -1,3 +1,3 @@
 from .imx219_stereo_cam import IMX219StereoCamera, IMX219StereoCameraConfig
 from .imx219_single_cam import IMX219SingleCamera, IMX219SingleCameraConfig
-from .grayscale_opencv import GrayscaleOpenCVCamConfig, GrayscaleOpenCVCam, CustomOpenCVCameraConfig, CustomOpenCVCamera
+from .grayscale_opencv import GrayscaleOpenCVCamConfig,GrayscaleOpenCVCam

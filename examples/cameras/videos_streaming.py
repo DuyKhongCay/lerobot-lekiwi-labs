@@ -28,15 +28,6 @@ import cv2
 import numpy as np
 import yaml
 from flask import Flask, Response, render_template_string
-# Setup paths to ensure we can import lerobot and local lab files
-script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-lerobot_src = project_root / "lerobot" / "src"
-if str(lerobot_src) not in sys.path:
-    sys.path.insert(0, str(lerobot_src))
-
 from lerobot.cameras.configs import CameraConfig
 from lerobot.cameras.utils import make_cameras_from_configs
 

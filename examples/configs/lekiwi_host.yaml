@@ -1,6 +1,4 @@
 host:
   connection_time_s: 180
 
-robot: 
-  <<: !include robot_configs.yaml
-  type: lekiwi
+robot: !include robot_configs.yaml
