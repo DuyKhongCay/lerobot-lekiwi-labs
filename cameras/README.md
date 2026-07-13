@@ -54,14 +54,18 @@ cd lekiwi_labs/dependencies/libcamera
 
 ### Step 3: Configure the build with Meson (Optimization)
 
-This is a crucial step so the system doesn't compile unnecessary modules. Assuming you are using a Pi 5 (pipeline is `rpi/pisp`), activate your virtual environment first, then run the configuration command:
+This is a crucial step so the system doesn't compile unnecessary modules. Assuming you are using a Pi 5 (pipeline is `rpi/pisp`), activate your virtual environment first.
 
+Depending on your requirements, choose one of the two options below:
+
+#### Option A: Python-Only Binding
+If you only need the Python bindings (`libcamera` for Python):
 ```bash
-# Activate your virtual environment first, for example:
-# source ~/my_env/bin/activate 
-# or conda activate my_env
+# Activate your virtual environment first (e.g., conda/mamba activate <env_name>)
 
 meson setup build \
+    --prefix=$CONDA_PREFIX \
+    --libdir=lib \
     -Dpipelines=rpi/pisp \
     -Dcam=disabled \
     -Dqcam=disabled \
@@ -70,7 +74,24 @@ meson setup build \
     -Dpython=enabled
 ```
 
-**Check the log:** Look at the Python configuration output line. If it shows **`YES`** and points correctly to the Python path in your virtual environment, then you have configured it correctly.
+#### Option B: Full Build (Both C++ and Python Bindings)
+If you want to build and install `libcamera` for both Python and C++ development inside your virtual environment:
+```bash
+# Activate your virtual environment first (e.g., conda/mamba activate <env_name>)
+
+meson setup build \
+    --prefix=$CONDA_PREFIX \
+    --libdir=lib \
+    -Dpipelines=rpi/pisp \
+    -Dcam=disabled \
+    -Dqcam=disabled \
+    -Dtest=false \
+    -Ddocumentation=disabled \
+    -Dpycamera=enabled
+```
+*Note: The `--prefix=$CONDA_PREFIX` flag is the key configuration here, ensuring all compiled headers, libraries, and bindings are installed directly into your virtual environment rather than system-wide.*
+
+**Check the log:** Look at the Python/pycamera configuration output line. If it shows **`YES`** and points correctly to the Python path in your virtual environment, then you have configured it correctly.
 
 ### Step 4: Safe Compilation (Avoid OOM)
 
@@ -85,22 +106,51 @@ ninja -C build -j 2
 
 ### Step 5: Safe integration into the virtual environment
 
-After the compilation is complete (reaches 100%), **absolutely DO NOT run the `sudo ninja install` command**. This command will push the library to the system-wide OS level and may cause conflicts, rendering your virtual environment ineffective.
+After the compilation is complete (reaches 100%), instead of copying files manually, you can automatically install everything into your virtual environment.
 
-Instead, grab the generated binding files directly:
+> [!IMPORTANT]
+> **DO NOT use `sudo`** for this installation command. Running it with `sudo` will install the files system-wide, potentially causing system conflicts.
 
-1. Navigate to the directory containing the newly built Python binding file:
-```bash
-cd build/src/py/libcamera
-```
-
-2. Look for the file with a `.so` extension (e.g., `_libcamera.cpython-312-aarch64-linux-gnu.so`).
-3. Copy the entire `libcamera` directory (or this `.so` file along with the `__init__.py` files) and paste it directly into the `site-packages` directory inside your virtual environment.
-
-**Example copy command:**
+Run the following command:
 
 ```bash
-cp -r build/src/py/libcamera /path/to/your/virtual_environment/lib/python3.x/site-packages/
+ninja -C build install
 ```
 
-This is the safest, most isolated, and most stable procedure, ensuring you get the `libcamera` library (along with Python bindings) that matches 100% with the Python version in your virtual environment, while avoiding the risk of hardware freezes during compilation.
+**What just happened?**
+Because you configured the `--prefix` flag in Step 3 and did not use `sudo`, Ninja will copy all necessary files directly into your active virtual environment:
+- **Headers** will go into: `$CONDA_PREFIX/include/libcamera`
+- **Libraries (.so)** will go into: `$CONDA_PREFIX/lib`
+- **pkg-config configurations** will go into: `$CONDA_PREFIX/lib/pkgconfig`
+- **Python binding files** will go into: `$CONDA_PREFIX/lib/python3.x/site-packages`
+
+Your host computer remains completely clean, and your active virtual environment now has a complete `libcamera` installation suitable for both C++ and Python.
+
+### Step 6: Configure CMakeLists.txt for your ROS 2 C++ Node (For Full Build Option)
+
+To let your C++ ROS 2 Node (e.g., `imx219_stereo_camera_node`) find this library during `colcon build`, you need to configure the `CMakeLists.txt` file in your package to use `pkg-config` (since libcamera's build system provides excellent support for it).
+
+In the [lekiwi_cameras/CMakeLists.txt](../../../lekiwi_cameras/CMakeLists.txt) package, this is integrated as follows:
+
+```cmake
+# Find the PkgConfig tool
+find_package(PkgConfig REQUIRED)
+
+# Find libcamera via pkg-config and create an IMPORTED target
+pkg_check_modules(LIBCAMERA REQUIRED IMPORTED_TARGET libcamera)
+
+# ... (Declare your executable) ...
+add_executable(imx219_stereo_camera_node src/imx219_stereo_camera_node.cpp)
+
+# Link the libcamera imported target along with other ROS 2 dependencies
+target_link_libraries(imx219_stereo_camera_node
+  rclcpp::rclcpp
+  sensor_msgs::sensor_msgs
+  cv_bridge::cv_bridge
+  image_transport::image_transport
+  camera_info_manager::camera_info_manager
+  ${OpenCV_LIBRARIES}
+  PkgConfig::LIBCAMERA
+)
+```
+*Note: Using `PkgConfig::LIBCAMERA` automatically handles adding the necessary include directories (`${LIBCAMERA_INCLUDE_DIRS}`) and linking the libraries (`${LIBCAMERA_LIBRARIES}`).*
