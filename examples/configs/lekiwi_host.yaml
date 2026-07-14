@@ -1,0 +1,4 @@
+host:
+  connection_time_s: 180
+
+robot: !include robot_configs.yaml

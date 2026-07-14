@@ -25,11 +25,14 @@ from dataclasses import dataclass
 from threading import Event, Lock
 from typing import Any
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from lerobot.cameras.camera import Camera
 from lerobot.cameras.configs import CameraConfig, ColorMode, Cv2Rotation
+from lerobot.cameras.utils import get_cv2_rotation
+from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
 from lerobot.utils.errors import DeviceNotConnectedError
 
 logger = logging.getLogger(__name__)
@@ -70,12 +73,14 @@ class IMX219SingleCameraConfig(CameraConfig):
             from ``connect()``. This allows auto-exposure to settle.
             Defaults to 2.
         buffer_count: Number of frame buffers allocated. Defaults to 4.
+        tuning_file: Path to custom tuning JSON file (optional).
     """
     camera_idx: int = 0
     color_mode: ColorMode = ColorMode.BGR
     rotation: Cv2Rotation = Cv2Rotation.NO_ROTATION
     warmup_s: int = 2
     buffer_count: int = 4
+    tuning_file: str | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration parameters."""
@@ -103,8 +108,8 @@ class IMX219SingleCamera(Camera):
         super().__init__(config)
         self.config = config
         self.fps: int | None = config.fps
-        self.width: int | None = None
-        self.height: int | None = None
+        self.width: int | None = config.width
+        self.height: int | None = config.height
 
         self._picam = None
         self._frame_lock: Lock = Lock()
@@ -112,6 +117,16 @@ class IMX219SingleCamera(Camera):
         self._latest_frame: NDArray[Any] | None = None
         self._latest_timestamp: float | None = None
         self._started: bool = False
+
+        self.rotation: int | None = get_cv2_rotation(config.rotation)
+
+        self.capture_width: int | None = None
+        self.capture_height: int | None = None
+
+        if self.height and self.width:
+            self.capture_width, self.capture_height = self.width, self.height
+            if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                self.capture_width, self.capture_height = self.height, self.width
 
     @property
     def is_connected(self) -> bool:
@@ -147,12 +162,9 @@ class IMX219SingleCamera(Camera):
             logger.warning(f"Picamera2 is installed but failed to enumerate cameras: {e}")
             return []
 
+    @check_if_already_connected
     def connect(self, warmup: bool = True) -> None:
         """Open the camera and start capturing frames."""
-        if self.is_connected:
-            logger.warning(f"{self} is already connected; skipping.")
-            return
-
         try:
             from picamera2 import Picamera2
         except ImportError as e:
@@ -162,21 +174,12 @@ class IMX219SingleCamera(Camera):
 
         logger.info(f"{self} opening camera (idx={self.config.camera_idx}) ...")
         try:
-            self._picam = Picamera2(self.config.camera_idx)
+            self._picam = Picamera2(self.config.camera_idx, tuning=self.config.tuning_file)
         except Exception as e:
             raise ConnectionError(f"Failed to open camera: {e}") from e
 
-        pixel_format = _FORMAT_MAP[self.config.color_mode]
-        w, h = self.config.width or 640, self.config.height or 480
-        fps = float(self.fps or 30)
-
         try:
-            cfg = self._picam.create_preview_configuration(
-                main={"format": pixel_format, "size": (w, h)},
-                buffer_count=self.config.buffer_count,
-                controls={"FrameRate": fps},
-            )
-            self._picam.configure(cfg)
+            self._configure_capture_settings()
         except Exception as e:
             self._release_camera()
             raise ConnectionError(f"Failed to configure camera: {e}") from e
@@ -190,9 +193,6 @@ class IMX219SingleCamera(Camera):
             self._release_camera()
             raise ConnectionError(f"Failed to start camera: {e}") from e
 
-        self.height = h
-        self.width = w
-
         logger.info(f"{self} camera started. Output shape: ({self.height}, {self.width}, 3)")
 
         if warmup and self.config.warmup_s > 0:
@@ -204,11 +204,97 @@ class IMX219SingleCamera(Camera):
 
             with self._frame_lock:
                 if self._latest_frame is None:
-                    raise RuntimeError(
+                    raise ConnectionError(
                         f"{self} warmup ended without receiving any frame. "
                         "Check that the camera is connected."
                     )
             logger.info(f"{self} warmup complete.")
+
+    def _configure_capture_settings(self) -> None:
+        """Applies the specified FPS, width, and height settings to the connected camera.
+
+        This method configures the hardware to capture at the requested resolution (for full FOV),
+        verifies the size applied by Picamera2, and falls back to 640x480 if necessary.
+        """
+        if self._picam is None:
+            raise DeviceNotConnectedError(f"{self} picamera2 is not initialized")
+
+        default_width = 640
+        default_height = 480
+
+        # Calculate capture resolution based on target width/height
+        if self.width is None or self.height is None:
+            self.width, self.height = default_width, default_height
+            self.capture_width, self.capture_height = default_width, default_height
+            if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                self.width, self.height = default_height, default_width
+                self.capture_width, self.capture_height = default_width, default_height
+        else:
+            if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                self.capture_width, self.capture_height = self.height, self.width
+            else:
+                self.capture_width, self.capture_height = self.width, self.height
+
+        if self.fps is None:
+            self.fps = 30
+
+        pixel_format = _FORMAT_MAP[self.config.color_mode]
+        try:
+            cfg = self._picam.create_preview_configuration(
+                main={"format": pixel_format, "size": (self.capture_width, self.capture_height)},
+                buffer_count=self.config.buffer_count,
+                controls={"FrameRate": float(self.fps)},
+            )
+            self._picam.configure(cfg)
+        except Exception as e:
+            raise RuntimeError(f"Failed to configure picamera2: {e}")
+
+        # Verify applied capture resolution from camera config
+        actual_size = self._picam.camera_config["main"]["size"]
+        actual_width, actual_height = actual_size[0], actual_size[1]
+
+        # Fallback to 640x480 if hardware doesn't support requested capture resolution
+        if self.capture_width != actual_width or self.capture_height != actual_height:
+            logger.warning(
+                f"[{self}] Failed to set hardware capture resolution to {self.capture_width}x{self.capture_height}. "
+                f"Falling back to 640x480 capture on hardware."
+            )
+            try:
+                cfg = self._picam.create_preview_configuration(
+                    main={"format": pixel_format, "size": (640, 480)},
+                    buffer_count=self.config.buffer_count,
+                    controls={"FrameRate": float(self.fps)},
+                )
+                self._picam.configure(cfg)
+            except Exception as e:
+                raise RuntimeError(f"Failed to fallback to 640x480 configuration: {e}")
+
+            actual_size = self._picam.camera_config["main"]["size"]
+            actual_width, actual_height = actual_size[0], actual_size[1]
+
+        self.capture_width = actual_width
+        self.capture_height = actual_height
+
+        # Determine target output width & height
+        # Downsample to 640x480 (or 480x640 if rotated 90 deg) if capture resolution is larger than 640x480
+        if self.capture_width is not None and self.capture_height is not None and (self.capture_width > 640 or self.capture_height > 480):
+            if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                self.width, self.height = 480, 640
+            else:
+                self.width, self.height = 640, 480
+        else:
+            if self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+                self.width, self.height = self.capture_height, self.capture_width
+            else:
+                self.width, self.height = self.capture_width, self.capture_height
+
+    def _resize_if_needed(self, image: NDArray[Any]) -> NDArray[Any]:
+        """Resizes the processed image to the target output resolution (self.width, self.height) if they differ."""
+        h, w = image.shape[:2]
+        if self.width is not None and self.height is not None:
+            if w != self.width or h != self.height:
+                image = cv2.resize(image, (self.width, self.height), interpolation=cv2.INTER_AREA)
+        return image
 
     def _callback(self, request: Any) -> None:
         """Callback to handle newly captured frames."""
@@ -219,6 +305,7 @@ class IMX219SingleCamera(Camera):
             return
 
         frame = self._apply_rotation(frame)
+        frame = self._resize_if_needed(frame)
 
         with self._frame_lock:
             self._latest_frame = frame
@@ -226,14 +313,9 @@ class IMX219SingleCamera(Camera):
             self._new_frame_event.set()
 
     def _apply_rotation(self, frame: NDArray[Any]) -> NDArray[Any]:
-        """Rotate frame using numpy rotations."""
-        rot = self.config.rotation
-        if rot == Cv2Rotation.ROTATE_90:
-            return np.rot90(frame, k=1)
-        elif rot == Cv2Rotation.ROTATE_180:
-            return np.rot90(frame, k=2)
-        elif rot == Cv2Rotation.ROTATE_270:
-            return np.rot90(frame, k=3)
+        """Rotate frame using OpenCV rotation settings."""
+        if self.rotation is not None and self.rotation in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_180]:
+            return cv2.rotate(frame, self.rotation)
         return frame
 
     def read(self) -> NDArray[Any]:

@@ -1,4 +1,0 @@
-robot:
-  type: lekiwi
-  port: /dev/ttyUSB0
-  id: DuyKhongCay

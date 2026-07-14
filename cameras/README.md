@@ -1,16 +1,19 @@
-# LeKiwi Cameras Packages
+# LeKiwi Cameras Modules
 
 ## 1. Overview
 This directory contains custom camera drivers and wrappers developed for the LeKiwi project, integrating seamlessly with the LeRobot framework. It provides specific implementations for handling grayscale USB cameras via OpenCV, as well as high-performance, synchronized CSI cameras (such as the IMX219 module) for the Raspberry Pi 5 using Picamera2.
 
-## 2. Grayscale OpenCV Camera
+## 2. Custom OpenCV Camera
+These modules feature an automatic downsampling mechanism for high-resolution video streams. This approach is necessary because the camera hardware automatically crops the image sensor at lower resolutions, which reduces the Field of View (FOV). To capture the widest possible FOV, the hardware must be configured to run at a higher resolution. The frames are then downsampled in software to 640x480 to optimize performance and reduce bandwidth while maintaining compatibility with the LeRobot pipeline. This feature is implemented in both `grayscale_opencv.py` and `imx219_single_cam.py`.
+
+## 3. Grayscale OpenCV Camera
 This module provides the `GrayscaleOpenCVCam` class (registered as `grayscaleopencv`), which extends LeRobot's base `OpenCVCamera`. 
 
 **Key Features:**
 - **Monochrome Support:** Specifically designed for grayscale cameras. It automatically converts single-channel raw frames into the 3-channel RGB/BGR formats required by the LeRobot vision pipeline.
 - **Hardware Control:** Automatically configures internal hardware settings upon connection, such as disabling auto-exposure and applying predefined manual exposure and gain values, ensuring consistent lighting during data collection.
 
-## 3. IMX219 CSI Camera
+## 4. IMX219 CSI Camera
 These modules provide native support for the Sony IMX219 sensor connected directly to the Raspberry Pi 5's CSI ports, leveraging the advanced `Picamera2` library for low-latency, high-performance capture.
 
 **Single Camera Features (`imx219single`):**
@@ -25,7 +28,49 @@ These modules provide native support for the Sony IMX219 sensor connected direct
 
 If you are planning to use the IMX219 CSI camera packages (`imx219_single_cam.py` or `imx219_stereo_cam.py`) on a Raspberry Pi 5 within a Python virtual environment, you must install the `libcamera` library and its Python bindings properly to avoid system crashes and conflicts. Installation guide down below.
 
-## 4. CSI Camera Library Virtual Environment Installation Guide
+## 5. IMX219-83 Stereo Camera IMU Configuration
+
+If you encounter an `[Errno 2] No such file or directory: '/dev/i2c-1'` error when running scripts with IMU enabled, it means the I2C interface is not activated on your Raspberry Pi 5.
+
+Although the physical GPIO2 (SDA) and GPIO3 (SCL) pins are correctly connected, you still need to enable I2C in the system configuration:
+
+### Step 1: Enable I2C on Raspberry Pi 5
+1. Run the system configuration tool:
+   ```bash
+   sudo raspi-config
+   ```
+2. Navigate to **Interface Options** -> **I2C**.
+3. Select **Yes** when asked if you want to enable the I2C interface.
+4. Select **Finish** and reboot your Raspberry Pi:
+   ```bash
+   sudo reboot
+   ```
+*(Alternatively, you can add `dtparam=i2c_arm=on` to `/boot/firmware/config.txt` and reboot).*
+
+### Step 2: Verify Hardware Connection
+1. After rebooting, check if the I2C device file exists:
+   ```bash
+   ls /dev/i2c*
+   ```
+   *If it returns `/dev/i2c-1` (or `/dev/i2c-11`), I2C is successfully enabled.*
+
+2. Scan the I2C bus (e.g., bus `1`) to check if the IMU sensor is detected:
+   ```bash
+   i2cdetect -y 1
+   ```
+   *If the ICM20948 sensor is correctly connected and powered, you will see the address **`68`** (or **`69`**) appear on the grid.*
+
+### Step 3: Adjust Configuration (If Bus Number is not 1)
+If your GPIO 2 & 3 pins map to a different bus (e.g., `/dev/i2c-11` instead of `/dev/i2c-1`), update the `imu_i2c_bus` parameter in your camera config initialization:
+```python
+config = IMX219StereoCameraConfig(
+    ...
+    enable_imu=True,
+    imu_i2c_bus=11,  # Update to the detected bus number
+)
+```
+
+## 6. CSI Camera Library Virtual Environment Installation Guide
 > [!WARNING]
 > This guide has currently only been tested on **Raspberry Pi 5**. If you are using a different hardware platform or an older Raspberry Pi model, please proceed with caution.
 
@@ -71,7 +116,7 @@ meson setup build \
     -Dqcam=disabled \
     -Dtest=false \
     -Ddocumentation=disabled \
-    -Dpython=enabled
+    -Dpycamera=enabled
 ```
 
 #### Option B: Full Build (Both C++ and Python Bindings)

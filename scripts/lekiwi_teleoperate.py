@@ -85,6 +85,8 @@ def main(cfg: TeleoperateConfig):
         raise ValueError("Robot, leader arm or keyboard teleop is not connected!")
 
     print("Starting teleop loop...")
+    prev_leader_servo6 = None
+    prev_follower_gripper = None
     try:
         while True:
             t0 = time.perf_counter()
@@ -96,7 +98,7 @@ def main(cfg: TeleoperateConfig):
             arm_action = leader_arm.get_action()
             
             # Map action keys to match expected arm joint names (prefixing keys with "arm_")
-            arm_action = {f"arm_{k}": v for k, v in arm_action.items()}
+            arm_action = {k: v for k, v in arm_action.items()}
             
             # Get action from the keyboard
             base_action = keyboard.get_action()

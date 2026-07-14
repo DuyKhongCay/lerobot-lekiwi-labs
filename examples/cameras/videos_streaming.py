@@ -28,15 +28,6 @@ import cv2
 import numpy as np
 import yaml
 from flask import Flask, Response, render_template_string
-# Setup paths to ensure we can import lerobot and local lab files
-script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-lerobot_src = project_root / "lerobot" / "src"
-if str(lerobot_src) not in sys.path:
-    sys.path.insert(0, str(lerobot_src))
-
 from lerobot.cameras.configs import CameraConfig
 from lerobot.cameras.utils import make_cameras_from_configs
 
@@ -120,6 +111,15 @@ def main(cfg: StreamConfig):
             try:
                 # Read latest processed frame (numpy array)
                 frame = camera.read_latest()
+                
+                # Resize frame if it exceeds target streaming resolution to ensure smooth stream
+                h, w = frame.shape[:2]
+                target_w, target_h = 640, 480
+                if w > target_w or h > target_h:
+                    scale = min(target_w / w, target_h / h)
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
                 
                 # LeRobot cameras default to RGB color mode. 
                 # OpenCV requires BGR format to encode JPEG correctly.

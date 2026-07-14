@@ -13,6 +13,38 @@ dependencies = [
     "picamera2; platform_machine == 'aarch64' or platform_machine == 'arm64' or platform_machine == 'armv7l'",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cameras*", "motors*", "teleoperates*"]
+[project.optional-dependencies]
+imu = [
+    "icm20948",
+    "smbus2",
+]
+
+[tool.setuptools]
+packages = [
+    "lekiwi_labs.cameras",
+    "lekiwi_labs.motors",
+    "lekiwi_labs.motors.zhongli",
+    "lekiwi_labs.teleoperates",
+    "lekiwi_labs.teleoperates.gamepad",
+    "lekiwi_labs.teleoperates.keyboard",
+    "lekiwi_labs.teleoperates.uarm_leader_config1",
+    "lekiwi_labs.scripts",
+    "lekiwi_labs.examples",
+    "lekiwi_labs.examples.cameras",
+    "lekiwi_labs.examples.motors",
+    "lekiwi_labs.examples.configs",
+]
+
+[tool.setuptools.package-dir]
+"lekiwi_labs.cameras" = "cameras"
+"lekiwi_labs.motors" = "motors"
+"lekiwi_labs.motors.zhongli" = "motors/zhongli"
+"lekiwi_labs.teleoperates" = "teleoperates"
+"lekiwi_labs.teleoperates.gamepad" = "teleoperates/gamepad"
+"lekiwi_labs.teleoperates.keyboard" = "teleoperates/keyboard"
+"lekiwi_labs.teleoperates.uarm_leader_config1" = "teleoperates/uarm_leader_config1"
+"lekiwi_labs.scripts" = "scripts"
+"lekiwi_labs.examples" = "examples"
+"lekiwi_labs.examples.cameras" = "examples/cameras"
+"lekiwi_labs.examples.motors" = "examples/motors"
+"lekiwi_labs.examples.configs" = "examples/configs"

@@ -7,4 +7,4 @@ id: DuyKhongCay
 polling_timeout_ms: 40         # give the host time to stream each observation (default 15)
 # Pin all 3 cameras explicitly (upstream's default dropped to 2); the client only uses
 # width/height for dataset feature shapes -- the host does the actual capture + rotation.
-cameras: !include lekiwi_cameras.yaml
+cameras: !include cameras_config.yaml
