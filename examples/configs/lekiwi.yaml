@@ -1,3 +1,3 @@
 robot: 
- <<: !include robot_configs.yaml
+ <<: !include robot_config.yaml
  type: lekiwi

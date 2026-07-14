@@ -17,6 +17,7 @@
 from functools import partialmethod
 from lerobot.robots.lekiwi.lekiwi import LeKiwi
 from lerobot.motors.feetech import FeetechMotorsBus
+from lerobot.configs import parser
 
 # Save original methods before they are modified by lekiwi_host.py import
 original_body_to_wheel_raw = LeKiwi._body_to_wheel_raw
@@ -44,12 +45,17 @@ lekiwi_host.LeKiwi._wheel_raw_to_body = partialmethod(  # type: ignore
 
 # Override Feetech motors acceleration parameter (default: 254)
 # You can change this value to adjust the acceleration and deceleration of the motors
-ACCELERATION = 100
+ACCELERATION = 50
 
-lekiwi_host.FeetechMotorsBus.configure_motors = partialmethod(  # type: ignore
+FeetechMotorsBus.configure_motors = partialmethod(  # type: ignore
     original_configure_motors,
     acceleration=ACCELERATION,
 )
 
+# Custom wrapper to support plugin packages discovery (such as camera types)
+@parser.wrap()
+def main(cfg: lekiwi_host.LeKiwiServerConfig):
+    lekiwi_host.main(cfg)
+
 if __name__ == "__main__":
-    lekiwi_host.main()
+    main()

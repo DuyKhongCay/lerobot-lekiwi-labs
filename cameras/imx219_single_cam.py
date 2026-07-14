@@ -320,10 +320,16 @@ class IMX219SingleCamera(Camera):
 
     def read(self) -> NDArray[Any]:
         """Capture and return the next frame (blocking)."""
+        start_time = time.perf_counter()
         if not self.is_connected:
             raise DeviceNotConnectedError(f"{self} is not connected.")
         self._new_frame_event.clear()
-        return self.async_read(timeout_ms=10_000)
+        frame = self.async_read(timeout_ms=10_000)
+
+        read_duration_ms = (time.perf_counter() - start_time) * 1e3
+        logger.debug(f"{self} read took: {read_duration_ms:.1f}ms")
+
+        return frame
 
     def async_read(self, timeout_ms: float = 200) -> NDArray[Any]:
         """Return the most recent new frame."""
@@ -355,6 +361,7 @@ class IMX219SingleCamera(Camera):
             raise RuntimeError(f"{self} has not captured any frames yet.")
 
         age_ms = (time.perf_counter() - timestamp) * 1e3
+        logger.debug(f"{self} read_latest age: {age_ms:.1f}ms")
         if age_ms > max_age_ms:
             raise TimeoutError(f"{self} latest frame is too stale: {age_ms:.1f} ms.")
         return frame

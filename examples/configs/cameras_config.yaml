@@ -1,20 +1,20 @@
 # Shared camera configuration for LeKiwi robot
-side:
-  type: grayscaleopencv
-  index_or_path: /dev/video16
-  fourcc: MJPG
-  fps: 30
-  width: 1280
-  height: 720
-  rotation: 0
-wrist:
-  type: opencv
-  index_or_path: /dev/video18
-  fourcc: MJPG
-  fps: 30
-  width: 1280  
-  height: 720
-  rotation: 0
+# side:
+#   type: grayscaleopencv
+#   index_or_path: /dev/video16
+#   fourcc: MJPG
+#   fps: 30
+#   width: 1280
+#   height: 720
+#   rotation: 0
+# wrist:
+#   type: opencv
+#   index_or_path: /dev/video18
+#   fourcc: MJPG
+#   fps: 30
+#   width: 1280  
+#   height: 720
+#   rotation: 0
 front_left:
     type: imx219single
     camera_idx: 1
@@ -30,3 +30,11 @@ front_right:
   width: 1640
   height: 1232
   rotation: 180
+# front:
+#   type: imx219stereo
+#   server_idx: 0
+#   client_idx: 1
+#   fps: 30
+#   width: 1640
+#   height: 1232
+#   rotation: 180

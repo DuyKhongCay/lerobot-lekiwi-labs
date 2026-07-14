@@ -37,7 +37,7 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import grayscale_opencv camera module: {e}")
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", force=True)
 logger = logging.getLogger("lekiwi_stream")
 
 
@@ -109,8 +109,11 @@ def main(cfg: StreamConfig):
         
         while True:
             try:
-                # Read latest processed frame (numpy array)
+                # Read latest processed frame (numpy array or tuple of arrays)
                 frame = camera.read_latest()
+                if isinstance(frame, (tuple, list)):
+                    left_frame, right_frame = frame
+                    frame = np.concatenate([left_frame, right_frame], axis=1)
                 
                 # Resize frame if it exceeds target streaming resolution to ensure smooth stream
                 h, w = frame.shape[:2]
@@ -844,6 +847,31 @@ def main(cfg: StreamConfig):
         """
         camera_types = {name: cfg.type for name, cfg in camera_configs.items()}
         return render_template_string(html_template, cameras=cameras, camera_types=camera_types)
+
+    # Start camera benchmark reporting thread
+    import threading
+    def print_benchmarks():
+        while True:
+            time.sleep(5.0)
+            for name, camera in list(cameras.items()):
+                if hasattr(camera, "get_benchmark_report"):
+                    try:
+                        report = camera.get_benchmark_report()
+                        target_period_ms = 1000.0 / report["target_fps"] if report["target_fps"] > 0 else 0.0
+                        print(f"============= CAMERA BENCHMARK REPORT ({report['duration']:.1f}s) =============")
+                        print(f"  Target FPS: {report['target_fps']:.1f} | Actual FPS: {report['actual_fps']:.2f}")
+                        print(f"  Published: {report['published']} | Total Dropped: {report['total_dropped']} "
+                              f"(Sync drop: {report['sync_drops']}, Queue drop: {report['queue_drops']})")
+                        print(f"  Drop Rate: {report['drop_rate']:.2f}% "
+                              f"(Sync: {report['sync_drop_rate']:.2f}%, Queue: {report['queue_drop_rate']:.2f}%)")
+                        print(f"  Latency (End-to-End): Avg: {report['avg_latency']:.2f} ms | Max: {report['max_latency']:.2f} ms")
+                        print(f"  Jitter (Std Dev of Period): {report['jitter']:.2f} ms (Target period: {target_period_ms:.2f} ms)")
+                        print("===========================================================")
+                    except Exception as e:
+                        logger.error(f"Error printing benchmark for camera {name}: {e}")
+
+    bench_thread = threading.Thread(target=print_benchmarks, daemon=True)
+    bench_thread.start()
 
     # Launch server
     lan_ip = get_lan_ip()

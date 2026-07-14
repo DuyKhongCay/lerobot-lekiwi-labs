@@ -212,6 +212,19 @@ class IMX219StereoCamera(IMX219SingleCamera):
         self._server_started: bool = False
         self._client_started: bool = False
 
+        # Benchmark variables
+        self._bench_lock: Lock = Lock()
+        self._bench_start_time: float = time.perf_counter()
+        self._total_published: int = 0
+        self._sync_drops: int = 0
+        self._queue_drops: int = 0
+        self._latencies_ms: list[float] = []
+        self._periods_ms: list[float] = []
+        self._last_pub_time_ms: float | None = None
+        self._frame_consumed: bool = True
+        self._clock_offset_ns: int = 0
+        self._clock_offset_initialized: bool = False
+
     # ──────────────────────────────────────────────────────────────────────────
     # Camera Interface – Properties
     # ──────────────────────────────────────────────────────────────────────────
@@ -330,9 +343,9 @@ class IMX219StereoCamera(IMX219SingleCamera):
             self._release_cameras()
             raise ConnectionError(f"{self} failed to start cameras: {e}") from e
 
-        # Set effective output dimensions
+        # Set effective output dimensions (for individual camera)
         self.height = h
-        self.width = 2 * w if self.config.concat_mode == "horizontal" else w
+        self.width = w
 
         logger.info(
             f"{self} cameras started. "
@@ -428,6 +441,10 @@ class IMX219StereoCamera(IMX219SingleCamera):
                 f"{self} internal error: new_frame_event was set but "
                 "latest_frame is None."
             )
+        
+        with self._bench_lock:
+            self._frame_consumed = True
+            
         return frame
 
     def read_latest(self, max_age_ms: int = 500) -> NDArray[Any]:
@@ -464,6 +481,10 @@ class IMX219StereoCamera(IMX219SingleCamera):
                 f"{self} latest stereo frame is too stale: {age_ms:.1f} ms "
                 f"(max allowed: {max_age_ms} ms)."
             )
+        
+        with self._bench_lock:
+            self._frame_consumed = True
+            
         return frame
 
     def disconnect(self) -> None:
@@ -605,9 +626,10 @@ class IMX219StereoCamera(IMX219SingleCamera):
 
         if diff_ms <= self.config.sync_threshold_ms:
             # ── Matched pair found ──────────────────────────────────────────
-            stereo_frame = self._concat_frames(server_frame, client_frame)
+            server_frame_rot = self._apply_rotation(server_frame)
+            client_frame_rot = self._apply_rotation(client_frame)
 
-            self._latest_frame = stereo_frame
+            self._latest_frame = (server_frame_rot, client_frame_rot)
             self._latest_timestamp = time.perf_counter()
 
             # Consume both pending frames
@@ -618,6 +640,46 @@ class IMX219StereoCamera(IMX219SingleCamera):
             self._new_frame_event.set()
 
             logger.debug(f"{self} matched pair (Δts={diff_ms:.2f} ms).")
+
+            with self._bench_lock:
+                pub_time_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+                
+                # Dynamic clock offset detection
+                if not self._clock_offset_initialized:
+                    if abs(pub_time_ns - server_ts) > 10_000_000_000:
+                        self._clock_offset_ns = pub_time_ns - server_ts
+                    self._clock_offset_initialized = True
+                
+                corrected_server_ts = server_ts + self._clock_offset_ns
+                latency_ms = (pub_time_ns - corrected_server_ts) / 1e6
+                if latency_ms < 0:
+                    latency_ms = 0.0
+                
+                self._latencies_ms.append(latency_ms)
+                
+                # Log individual frame latency to CSV if environment variable is set
+                import os
+                csv_path = os.environ.get("CAMERA_BENCHMARK_CSV")
+                if csv_path:
+                    try:
+                        if not os.path.exists(csv_path):
+                            with open(csv_path, "w") as f:
+                                f.write("timestamp,latency_ms\n")
+                        with open(csv_path, "a") as f:
+                            f.write(f"{pub_time_ns / 1e9},{latency_ms:.4f}\n")
+                    except Exception as csv_err:
+                        logger.debug(f"Failed to log latency to CSV: {csv_err}")
+                
+                pub_time_ms = pub_time_ns / 1e6
+                if self._last_pub_time_ms is not None:
+                    period_ms = pub_time_ms - self._last_pub_time_ms
+                    self._periods_ms.append(period_ms)
+                self._last_pub_time_ms = pub_time_ms
+                
+                if not self._frame_consumed:
+                    self._queue_drops += 1
+                self._frame_consumed = False
+                self._total_published += 1
         else:
             # ── Frames are out-of-sync – drop the older one ─────────────────
             if server_ts < client_ts:
@@ -632,6 +694,67 @@ class IMX219StereoCamera(IMX219SingleCamera):
                     f"(Δts={diff_ms:.2f} ms > threshold={self.config.sync_threshold_ms} ms)."
                 )
                 self._pending_client = None
+                
+            with self._bench_lock:
+                self._sync_drops += 1
+
+    def get_benchmark_report(self) -> dict[str, Any]:
+        """Compute camera benchmark report and reset metrics."""
+        with self._bench_lock:
+            now = time.perf_counter()
+            duration = now - self._bench_start_time
+            self._bench_start_time = now
+
+            published = self._total_published
+            sync_drops = self._sync_drops
+            queue_drops = self._queue_drops
+            total_dropped = sync_drops + queue_drops
+
+            # Actual FPS
+            actual_fps = published / duration if duration > 0 else 0.0
+
+            # Drop rates
+            total_frames = published + total_dropped
+            drop_rate = (total_dropped / total_frames * 100) if total_frames > 0 else 0.0
+            sync_drop_rate = (sync_drops / total_frames * 100) if total_frames > 0 else 0.0
+            queue_drop_rate = (queue_drops / total_frames * 100) if total_frames > 0 else 0.0
+
+            # Latency stats
+            if self._latencies_ms:
+                avg_latency = sum(self._latencies_ms) / len(self._latencies_ms)
+                max_latency = max(self._latencies_ms)
+            else:
+                avg_latency = 0.0
+                max_latency = 0.0
+
+            # Jitter stats
+            if self._periods_ms:
+                jitter = float(np.std(self._periods_ms))
+            else:
+                jitter = 0.0
+
+            # Reset metrics
+            self._total_published = 0
+            self._sync_drops = 0
+            self._queue_drops = 0
+            self._latencies_ms.clear()
+            self._periods_ms.clear()
+
+            return {
+                "duration": duration,
+                "target_fps": float(self.fps) if self.fps else 30.0,
+                "actual_fps": actual_fps,
+                "published": published,
+                "total_dropped": total_dropped,
+                "sync_drops": sync_drops,
+                "queue_drops": queue_drops,
+                "drop_rate": drop_rate,
+                "sync_drop_rate": sync_drop_rate,
+                "queue_drop_rate": queue_drop_rate,
+                "avg_latency": avg_latency,
+                "max_latency": max_latency,
+                "jitter": jitter,
+            }
 
     def _concat_frames(
         self, server_frame: NDArray[Any], client_frame: NDArray[Any]
